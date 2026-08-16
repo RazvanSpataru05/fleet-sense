@@ -15,7 +15,7 @@ from scipy.io import loadmat
 from scipy.stats import kurtosis
 
 DATASET_DIR = Path("dataset")
-OUTPUT_CSV = Path("features.csv")
+OUTPUT_CSV = Path("training_features.csv")
 
 FS_CURRENT = 64000  # Hz, sample rate of phase_current_1/2
 FUNDAMENTAL_SEARCH_BAND = (5.0, 200.0)  # Hz, where to look for the electrical fundamental
