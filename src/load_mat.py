@@ -6,8 +6,10 @@ import numpy as np
 from scipy.io import loadmat
 from scipy.stats import kurtosis
 
-DATASET_DIR = Path("dataset")
-OUTPUT_CSV = Path("training_features.csv")
+BASE_DIR = Path(__file__).resolve().parent
+DATASET_DIR = BASE_DIR.parent / "dataset"
+ARTIFACTS_DIR = BASE_DIR / "artifacts" / "scalar"
+OUTPUT_CSV = ARTIFACTS_DIR / "training_features.csv"
 
 FS_CURRENT = 64000  # Hz, sample rate of phase_current_1/2
 FUNDAMENTAL_SEARCH_BAND = (5.0, 200.0)  # Hz, where to look for the electrical fundamental
@@ -187,6 +189,7 @@ def main():
         print("No rows extracted, nothing written.")
         return
 
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     fieldnames = list(rows[0].keys())
     with open(OUTPUT_CSV, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)

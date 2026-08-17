@@ -1,8 +1,13 @@
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 import joblib
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
+
+BASE_DIR = Path(__file__).resolve().parent
+ARTIFACTS_DIR = BASE_DIR / "artifacts" / "scalar"
 
 IDENTIFIER_COLS = ['bearing_code', 'condition_code', 'repetition']
 
@@ -17,7 +22,7 @@ def drop_columns(df):
     return new_df
 
 def main():
-    df_features = pd.read_csv('training_features.csv')
+    df_features = pd.read_csv(ARTIFACTS_DIR / 'training_features.csv')
     print(df_features.size)
 
     if TRAIN_CONDITION is not None:
@@ -34,7 +39,8 @@ def main():
     print(features_normalized_df.mean())
     print(features_normalized_df.std())
 
-    joblib.dump(scaler, 'scaler.pkl')
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+    joblib.dump(scaler, ARTIFACTS_DIR / 'scaler.pkl')
 
     X_train, X_val, identifiers_train, identifiers_val = train_test_split(
         features_normalized, identifiers, test_size=0.2, random_state=42
@@ -43,10 +49,10 @@ def main():
     print(X_train.shape)
     print(X_val.shape)
 
-    np.save('X_train.npy', X_train)
-    np.save('X_val.npy', X_val)
-    np.save('condition_train.npy', identifiers_train['condition_code'].to_numpy())
-    np.save('condition_val.npy', identifiers_val['condition_code'].to_numpy())
+    np.save(ARTIFACTS_DIR / 'X_train.npy', X_train)
+    np.save(ARTIFACTS_DIR / 'X_val.npy', X_val)
+    np.save(ARTIFACTS_DIR / 'condition_train.npy', identifiers_train['condition_code'].to_numpy())
+    np.save(ARTIFACTS_DIR / 'condition_val.npy', identifiers_val['condition_code'].to_numpy())
 
 if __name__ == "__main__":
     main()

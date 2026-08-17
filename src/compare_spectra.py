@@ -6,12 +6,12 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-from load_mat import compute_fft, extract_channels, load_struct
+from load_mat import DATASET_DIR, compute_fft, extract_channels, load_struct
 
 FS_CURRENT = 64000  # Hz
 
-HEALTHY_FILE = Path("dataset/K001/N09_M07_F10_K001_1.mat")
-DAMAGED_FILE = Path("dataset/KA04/N09_M07_F10_KA04_1.mat")
+HEALTHY_FILE = DATASET_DIR / "K001" / "N09_M07_F10_K001_1.mat"
+DAMAGED_FILE = DATASET_DIR / "KA04" / "N09_M07_F10_KA04_1.mat"
 
 
 def load_phase_current_1(mat_path: Path):

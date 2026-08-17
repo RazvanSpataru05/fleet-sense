@@ -1,14 +1,19 @@
+from pathlib import Path
+
 import numpy as np
 import joblib
 from sklearn.ensemble import IsolationForest
 
-X_train = np.load('X_train.npy')
-X_val = np.load('X_val.npy')
+BASE_DIR = Path(__file__).resolve().parent
+ARTIFACTS_DIR = BASE_DIR / "artifacts" / "scalar"
+
+X_train = np.load(ARTIFACTS_DIR / 'X_train.npy')
+X_val = np.load(ARTIFACTS_DIR / 'X_val.npy')
 
 model = IsolationForest(random_state=42)
 model.fit(X_train)
 
-joblib.dump(model, 'isolation_forest.pkl')
+joblib.dump(model, ARTIFACTS_DIR / 'isolation_forest.pkl')
 
 val_scores = model.score_samples(X_val)
 
