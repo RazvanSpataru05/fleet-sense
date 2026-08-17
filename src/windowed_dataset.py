@@ -30,9 +30,17 @@ STRIDE_SAMPLES = int(WINDOW_SAMPLES * (1 - OVERLAP))
 FREQ_BAND = (0.0, 150.0)  # Hz, wide spectral band kept per window
 
 
-def list_condition_files(condition=CONDITION):
+EXCLUDE_REPETITIONS = (1,)  # rep 1 of every healthy bearing shows a broadband noise-floor
+# elevation not present in reps 2-20 (confirmed by direct envelope-spectrum inspection) --
+# most likely a session-level recording-condition artifact, not a property of the bearing.
+
+
+def list_condition_files(condition=CONDITION, exclude_reps=EXCLUDE_REPETITIONS):
     files = sorted(DATASET_DIR.glob("K0*/*.mat"))
-    return [f for f in files if parse_filename(f)[1] == condition]
+    return [
+        f for f in files
+        if parse_filename(f)[1] == condition and parse_filename(f)[2] not in exclude_reps
+    ]
 
 
 def split_files(files, val_size=VAL_SIZE, random_state=RANDOM_STATE):
