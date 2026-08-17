@@ -7,7 +7,7 @@ from scipy.io import loadmat
 from scipy.stats import kurtosis
 
 BASE_DIR = Path(__file__).resolve().parent
-DATASET_DIR = BASE_DIR.parent / "dataset"
+DATASET_DIR = BASE_DIR.parent.parent / "dataset" / "paderborn"
 ARTIFACTS_DIR = BASE_DIR / "artifacts" / "scalar"
 OUTPUT_CSV = ARTIFACTS_DIR / "training_features.csv"
 
