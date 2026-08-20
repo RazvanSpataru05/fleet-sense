@@ -46,7 +46,14 @@ OVERLAP = 0.5
 WINDOW_SAMPLES = int(WINDOW_SEC * FS)
 STRIDE_SAMPLES = int(WINDOW_SAMPLES * (1 - OVERLAP))
 
-FUNDAMENTAL_SEARCH_BAND = (10.0, 30.0)  # Hz, tight around the known ~16.67Hz at 1000rpm
+FUNDAMENTAL_SEARCH_MARGIN_HZ = 5.0  # +/- around the nominal electrical frequency for this
+# motor's RPM (2-pole: f_e ~= rpm/60, tiny slip). Was a fixed (10,30)Hz band -- only valid
+# at 1000rpm (~16.7Hz); gave nonsense (negative/impossible slip) at 2000/3000rpm since
+# their true fundamentals (~33.3Hz, ~50Hz) fall outside that fixed window entirely. Made
+# adaptive per-file using the RPM already in every filename so all 3 RPMs (and both
+# torque levels) become usable, not just the one condition this pipeline started scoped
+# to. Checked against all 3 RPMs directly: detected frequency lands within 0.4% of
+# nominal every time, comfortably inside a +/-5Hz window.
 ENVELOPE_BAND = (0.0, 200.0)  # Hz, ~12x shaft frequency -- wide enough for any common bearing's BPFO/BPFI
 BIN_GROUP = 4  # average-pool this many native (2Hz) bins together -> ~8Hz effective resolution.
 # Only 359 windows exist at this single condition (no repeated files like Paderborn);
@@ -98,21 +105,27 @@ def compute_fft(signal, fs=FS):
     return freqs, magnitude
 
 
-def detect_fundamental_hz(freqs, magnitude, band=FUNDAMENTAL_SEARCH_BAND):
+def detect_fundamental_hz(freqs, magnitude, band) -> float:
     lo, hi = band
     mask = (freqs >= lo) & (freqs <= hi)
     band_freqs, band_mag = freqs[mask], magnitude[mask]
     return float(band_freqs[np.argmax(band_mag)])
 
 
-def shaft_hz_for_file(df) -> float:
+def fundamental_search_band(nominal_rpm: float, margin_hz: float = FUNDAMENTAL_SEARCH_MARGIN_HZ) -> tuple:
+    nominal_hz = nominal_rpm / 60.0  # 2-pole motor: f_e ~= mechanical frequency
+    return (nominal_hz - margin_hz, nominal_hz + margin_hz)
+
+
+def shaft_hz_for_file(df, nominal_rpm: float) -> float:
     """Detected once per file from the full ~90s recording, not per 0.5s window --
     a short window's FFT frequency resolution is coarse enough that fundamental
     detection got noticeably unstable in spot checks (dropped to 10-15Hz instead of
     ~16.7Hz in some 10s slices). The full recording gives ~0.011Hz resolution and a
-    stable estimate that's reused for every window in that file."""
+    stable estimate that's reused for every window in that file. nominal_rpm (from the
+    filename) picks the search band -- see fundamental_search_band."""
     freqs, magnitude = compute_fft(df["current_a"].values)
-    return detect_fundamental_hz(freqs, magnitude)
+    return detect_fundamental_hz(freqs, magnitude, band=fundamental_search_band(nominal_rpm))
 
 
 def bearing_fault_frequencies(shaft_hz: float, ratios=BEARING_FAULT_RATIOS) -> dict:
@@ -122,6 +135,119 @@ def bearing_fault_frequencies(shaft_hz: float, ratios=BEARING_FAULT_RATIOS) -> d
 def targeted_fault_magnitude(freqs, magnitude, fault_hz, window_hz=TARGETED_FAULT_WINDOW_HZ):
     mask = (freqs >= fault_hz - window_hz) & (freqs <= fault_hz + window_hz)
     return float(magnitude[mask].max()) if mask.any() else 0.0
+
+
+# Broken rotor bar: classic signature is a "twice-slip-frequency" sideband at
+# f_e * (1 +/- 2*k*s) in the RAW spectrum -- which, after envelope demodulation
+# (the same trick used for bearings), collapses to a single peak at 2*k*s*f_e
+# directly, since that's the separation between the carrier and its sidebands.
+# Only k=1 for a first pass. This target frequency is tiny (~0.13Hz at our scoped
+# condition) -- far too low to resolve in a 0.5s window (native resolution ~2Hz,
+# smaller than one bin), so unlike BPFO/BPFI/BSF this has to be computed once from
+# the FULL ~90s recording, not per-window, then replicated as a per-file constant.
+ROTOR_BAR_SEARCH_WINDOW_HZ = 0.1  # generous relative to the target's own tiny scale,
+# to tolerate slip-estimate imprecision, but still far from DC
+
+
+def estimate_slip(f_e: float, nominal_rpm: float) -> float:
+    """Slip = (synchronous - actual) / synchronous. For this 2-pole motor, synchronous
+    mechanical frequency in Hz equals f_e directly (poles=2 means pole-pairs=1, so
+    n_sync = 60*f_e -> f_sync(Hz) = f_e). Nominal rpm from the filename stands in for
+    actual mechanical speed -- an approximation, not a direct measurement, since the
+    keyphase channel itself was too noisy to reliably derive true RPM from earlier."""
+    f_mech_nominal = nominal_rpm / 60.0
+    return (f_e - f_mech_nominal) / f_e
+
+
+def rotor_bar_frequency(f_e: float, slip: float, k: int = 1) -> float:
+    return 2 * k * slip * f_e
+
+
+def rotor_bar_magnitude_for_file(df, f_e: float, nominal_rpm: float) -> dict:
+    """Computed once from the FULL recording per phase -- see module docstring on why
+    this can't be a per-window feature the way BPFO/BPFI/BSF are."""
+    slip = estimate_slip(f_e, nominal_rpm)
+    target_hz = rotor_bar_frequency(f_e, slip, k=1)
+    result = {}
+    for ch in CURRENT_CHANNELS:
+        env = envelope_signal(df[ch].values)
+        freqs, magnitude = compute_fft(env)
+        result[ch] = targeted_fault_magnitude(freqs, magnitude, target_hz, window_hz=ROTOR_BAR_SEARCH_WINDOW_HZ)
+    return result
+
+
+# Stator winding faults: classic MCSA signature is elevated NEGATIVE-SEQUENCE current --
+# unlike BPFO/BPFI/BSF/rotor-bar, this isn't about a modulation frequency at all. It's
+# a cross-phase quantity: decompose the three phase currents' complex value AT the
+# fundamental frequency itself (not the envelope) using the standard symmetrical-
+# component transform. A healthy, balanced three-phase system has ~zero negative-
+# sequence current; any three-phase imbalance raises it. That's also the known caveat
+# going in: an unbalanced SUPPLY voltage produces the same signature as a winding short,
+# so this feature may not distinguish winding_H from voltage_unbalance_L -- to be
+# checked empirically, not assumed.
+#
+# First implementation used a fixed "a"/"a^2" assignment for positive vs negative
+# sequence and got nonsense: healthy files showed a LARGE "negative sequence" while
+# voltage_unbalance_L showed a small one. Root cause, confirmed by comparing the phase
+# angle of current_b relative to current_a across files: which physical channel leads
+# by 120 degrees vs lags by 120 degrees is NOT consistent across recordings in this
+# dataset (health/winding/bearing_ball/broken_bar go one way, voltage_unbalance/
+# bearing_outer/bearing_inner go the other) -- an inconsistent phase-labeling/wiring
+# convention across recording sessions, not a physical finding. Fixed by computing both
+# candidate sequence assignments per file and always taking the SMALLER one as "negative
+# sequence" -- for a real motor, most of the current is always in whichever sequence is
+# actually dominant, so the smaller of the two is the rotation-invariant imbalance
+# measure regardless of which way this particular file happens to be wired.
+NEGATIVE_SEQUENCE_SEARCH_WINDOW_HZ = 1.0  # around f_e, for the fundamental's own phasor
+PHASE_ROTATION = np.exp(1j * 2 * np.pi / 3)  # the "a" operator in symmetrical components
+
+
+def phasor_at_frequency(signal, fs, target_hz, window_hz=NEGATIVE_SEQUENCE_SEARCH_WINDOW_HZ):
+    """Like targeted_fault_magnitude, but keeps the complex value (magnitude AND phase)
+    -- symmetrical components need phase, not just magnitude."""
+    n = len(signal)
+    fft_vals = np.fft.rfft(signal)
+    freqs = np.fft.rfftfreq(n, d=1 / fs)
+    mask = (freqs >= target_hz - window_hz) & (freqs <= target_hz + window_hz)
+    if not mask.any():
+        return 0j
+    band_vals = fft_vals[mask]
+    peak_idx = np.argmax(np.abs(band_vals))
+    return band_vals[peak_idx] / n
+
+
+def negative_sequence_magnitude_for_file(df, f_e: float) -> float:
+    """Computed once from the FULL recording, combining all three phases into one
+    number -- unlike the other targeted features, this is inherently a cross-phase
+    quantity, not something computed independently per phase. See module note above
+    on why this takes the smaller of the two candidate sequence assignments."""
+    phasors = {ch: phasor_at_frequency(df[ch].values, FS, f_e) for ch in CURRENT_CHANNELS}
+    a = PHASE_ROTATION
+    seq_1 = (phasors["current_a"] + a * phasors["current_b"] + a ** 2 * phasors["current_c"]) / 3
+    seq_2 = (phasors["current_a"] + a ** 2 * phasors["current_b"] + a * phasors["current_c"]) / 3
+    return float(min(np.abs(seq_1), np.abs(seq_2)))
+
+
+# Eccentricity: a genuinely uneven air gap modulates the stator current at multiples of
+# the mechanical rotation frequency. No rotor-slot-count-based formula was attempted here
+# (the standard rigorous approach -- rotor slot harmonics -- needs the rotor's slot count,
+# which isn't available from this dataset or its paper); instead this uses the simpler,
+# well-established generic signature: an envelope-spectrum peak at 2x rotation frequency.
+# Checked empirically (raw sanity check, before wiring in) across every fault type: this
+# cleanly separates static_eccentricity_H/L (and their bearing-combo variants) from every
+# mechanical fault and from healthy. It does NOT separate dynamic_eccentricity at all --
+# scanned 1x through 5x harmonics and dynamic_eccentricity tracked healthy closely at every
+# one, so no formula is claimed for it; it stays undiagnosable for now, same as broken_bar.
+# Also note: voltage_unbalance_L shows an even LARGER peak here than real eccentricity --
+# expected, since it's a broad disturbance that inflates nearly everything -- so this alone
+# doesn't discriminate eccentricity from voltage imbalance; that's left to the per-family
+# vs-generic-baseline gating in diagnose_mcc5.py, the same mechanism already relied on to
+# keep voltage_unbalance_L from hijacking the neg_seq family.
+STATIC_ECCENTRICITY_HARMONIC = 2  # multiple of shaft frequency
+
+
+def static_eccentricity_frequency(shaft_hz: float, harmonic: int = STATIC_ECCENTRICITY_HARMONIC) -> float:
+    return harmonic * shaft_hz
 
 
 def envelope_signal(signal):
@@ -154,8 +280,11 @@ def windows_for_file(csv_path: Path) -> list:
     df = load_recording(csv_path)
     meta = parse_filename(csv_path)
 
-    shaft_hz = shaft_hz_for_file(df)
+    shaft_hz = shaft_hz_for_file(df, meta["rpm"])
     fault_freqs = bearing_fault_frequencies(shaft_hz)
+    rotor_bar_mag = rotor_bar_magnitude_for_file(df, shaft_hz, meta["rpm"])
+    neg_seq_mag = negative_sequence_magnitude_for_file(df, shaft_hz)
+    eccentricity_hz = static_eccentricity_frequency(shaft_hz)
 
     windows_per_channel = {ch: window_signal(df[ch].values) for ch in CURRENT_CHANNELS}
     torque_measured = float(df["torque"].mean())
@@ -182,6 +311,10 @@ def windows_for_file(csv_path: Path) -> list:
 
             for fault_hz in fault_freqs.values():
                 row.append(targeted_fault_magnitude(freqs, magnitude, fault_hz))
+
+            row.append(rotor_bar_mag[ch])  # per-file constant, not per-window (see above)
+            row.append(targeted_fault_magnitude(freqs, magnitude, eccentricity_hz))
+        row.append(neg_seq_mag)  # cross-phase, per-file constant -- one value, not per-channel
         row.extend([meta["torque_nm"], meta["rpm"], torque_measured, shaft_hz])
         rows.append(row)
     return rows
