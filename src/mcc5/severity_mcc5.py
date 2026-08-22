@@ -99,7 +99,7 @@ def train_final_models(X, y, torque_nm, rpm, split: str):
         clf = _new_classifier()
         clf.fit(Xs, ys)
         models[location] = clf
-    joblib.dump(models, severity_model_path(split))
+    joblib.dump(models, severity_model_path(split), compress=3)  # lossless -- see presence_mcc5
     return models
 
 

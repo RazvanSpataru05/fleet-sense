@@ -144,9 +144,9 @@ def train_final_model(split: str):
         baselines[(t, r)] = float(reconstruction_error(model, scaler.transform(X[m])).mean())
 
     out_dir = artifacts_dir(split)
-    joblib.dump(model, out_dir / "anomaly_model_multi_condition.pkl")
-    joblib.dump(scaler, out_dir / "anomaly_scaler_multi_condition.pkl")
-    joblib.dump(baselines, out_dir / "anomaly_healthy_baselines.pkl")
+    joblib.dump(model, out_dir / "anomaly_model_multi_condition.pkl", compress=3)  # lossless -- see presence_mcc5
+    joblib.dump(scaler, out_dir / "anomaly_scaler_multi_condition.pkl", compress=3)
+    joblib.dump(baselines, out_dir / "anomaly_healthy_baselines.pkl", compress=3)
     print(f"{split}: final model trained on {healthy_mask.sum()} healthy windows across "
           f"{len(baselines)} conditions -- saved to {out_dir}")
     return model, baselines

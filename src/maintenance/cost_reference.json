@@ -1,0 +1,237 @@
+{
+  "_readme": [
+    "Cost reference for FleetSense Layer 3. Plain data, deliberately not code -- a",
+    "maintenance engineer should be able to update these figures without touching Python.",
+    "",
+    "Structure:",
+    "  labour_rates_eur_per_hour  hourly rates used to derive the labour part of a job",
+    "  repair_jobs                the actual remedial actions, each with a cost BAND",
+    "  locations                  the 9 fault locations FleetSense can detect, each",
+    "                             pointing at the repair_job that fixes it",
+    "",
+    "Why locations map to jobs rather than carrying their own prices: bearing_outer,",
+    "bearing_inner and bearing_ball are three detections of ONE physical bearing. They",
+    "share a single job id, so a file flagging all three still costs one bearing job, not",
+    "three. Summing per-location costs would report ~3x the real figure.",
+    "",
+    "Jobs marked action='replace' supersede action='repair' jobs: if a broken rotor bar",
+    "sends you to a new motor you do not additionally pay to change its bearings. The",
+    "consuming code is responsible for that resolution.",
+    "",
+    "Costs are BANDS, never point values. Two reasons: real quotes vary by shop, and",
+    "FleetSense's own presence_confidence values are RandomForest vote fractions, not",
+    "calibrated probabilities -- so a single precise euro figure would imply a certainty",
+    "the model does not have."
+  ],
+
+  "meta": {
+    "currency": "EUR",
+    "compiled": "2026-08-22",
+    "market": "Romania",
+    "market_warning": "These are Romanian market prices expressed in EUR, NOT EU-wide figures. Converting the currency does not make them portable: labour rates in Western Europe run several times higher (a Romanian shop rate of ~EUR 16-30/h compares with EUR 80-120/h in Germany or Austria). Parts prices travel well; labour does not. Re-source the labour_rates block before using this outside Romania.",
+    "fx_rate_used": "1 EUR = 5.0 RON (approximate; RON is a loosely managed float against EUR and has sat near 4.95-5.10 for several years)",
+    "vat_note": "Romanian retail prices quoted include TVA at 19%. The rewind figure is explicitly VAT-inclusive (520 RON incl. / 430 RON excl.).",
+    "motor_under_analysis": "2.2 kW three-phase asynchronous induction motor, 2-pole (pole-pairs = 1, confirmed from the measured electrical fundamental). Bearing type SKF 6205-2Z/C3, named in the MCC5-THU dataset paper.",
+    "known_gaps": [
+      "Romanian motor rewinding shops overwhelmingly do not publish prices -- the usual answer is 'preturile sunt negociabile pentru fiecare lucrare in parte'. The rewind figure below is one shop's published rate, not a market average.",
+      "shaft_repair has no published Romanian price anywhere I could find; its band is derived from shop labour hours only. It is the least trustworthy line here and is marked confidence 'low'.",
+      "The published rewind service is quoted for motors up to 2 kW. This motor is 2.2 kW, marginally above that bracket."
+    ]
+  },
+
+  "labour_rates_eur_per_hour": {
+    "motor_workshop": {
+      "min": 16,
+      "max": 30,
+      "note": "Derived from Romanian electrician rates: 80-130 RON/h in major cities, 100-150 RON/h in Bucharest.",
+      "confidence": "medium_high"
+    },
+    "authorised_electrician": {
+      "min": 20,
+      "max": 40,
+      "note": "ANRE-authorised rate, 100-200 RON/h. Emergency or out-of-hours work carries a 30-50% premium not modelled here.",
+      "confidence": "medium_high"
+    }
+  },
+
+  "repair_jobs": {
+    "bearing_replacement": {
+      "label": "Replace both bearings",
+      "action": "repair",
+      "category": "motor_mechanical",
+      "cost_eur": { "min": 24, "max": 68 },
+      "breakdown": {
+        "parts_eur": 8,
+        "parts_detail": "2 x SKF 6205-2Z/C3 at EUR 4 each (19.95 RON). Bearings are replaced in pairs: the second bearing has seen identical service hours and replacing one alone invites a repeat teardown.",
+        "labour_hours": { "min": 1, "max": 2 },
+        "labour_rate": "motor_workshop"
+      },
+      "confidence": "high",
+      "sources": ["rulmentika_6205", "electrician_rates_bucuresti", "daibau_electrician"]
+    },
+
+    "stator_rewind": {
+      "label": "Rewind stator",
+      "action": "repair",
+      "category": "motor_electrical",
+      "cost_eur": { "min": 104, "max": 120 },
+      "breakdown": {
+        "parts_eur": null,
+        "parts_detail": "All-in shop price. The published service covers rewinding to manufacturer spec, bearing replacement and varnishing, with a 6-month warranty -- so it already absorbs bearing_replacement.",
+        "labour_hours": null,
+        "labour_rate": null
+      },
+      "absorbs": ["bearing_replacement"],
+      "economic_alternative": "motor_replacement",
+      "economic_note": "Borderline for this motor. Against a budget 2-pole replacement (EUR 145) a rewind is ~72% of new-motor cost, which exceeds the ~57% industry rule of thumb and argues for replacement. Against a better-specified motor (EUR 405) the same rewind is ~26% and clearly worth doing. The verdict genuinely depends on which motor you would buy to replace it.",
+      "confidence": "high",
+      "sources": ["profiairvent_rewind", "industrialmonitor_repair_replace", "universalrewind_repair_replace"]
+    },
+
+    "motor_replacement": {
+      "label": "Replace motor",
+      "action": "replace",
+      "category": "motor_electrical",
+      "cost_eur": { "min": 145, "max": 405 },
+      "breakdown": {
+        "parts_eur": null,
+        "parts_detail": "EUR 145 = budget 2-pole 2.2 kW (723 RON, Gamak AGM2E 90 L 2, 2880 rpm, IP55, 83% efficiency). EUR 405 = higher-specified 4-pole unit (2023.92 RON). The motor under analysis is 2-pole, so the lower end is the honest comparator. Excludes removal/refitting labour.",
+        "labour_hours": null,
+        "labour_rate": null
+      },
+      "confidence": "high",
+      "sources": ["dedeman_motor", "ventsys_motor"]
+    },
+
+    "shaft_repair": {
+      "label": "Straighten or re-machine shaft",
+      "action": "repair",
+      "category": "motor_mechanical",
+      "cost_eur": { "min": 32, "max": 120 },
+      "breakdown": {
+        "parts_eur": null,
+        "parts_detail": "Machine-shop work. A replacement shaft, where straightening is not viable, pushes this toward the motor_replacement band and the two should be compared.",
+        "labour_hours": { "min": 2, "max": 4 },
+        "labour_rate": "motor_workshop"
+      },
+      "economic_alternative": "motor_replacement",
+      "confidence": "low",
+      "confidence_note": "No published Romanian price found for shaft straightening. Derived from workshop labour hours alone -- treat as an order-of-magnitude estimate, not a quote.",
+      "sources": ["repairengineering_shaft"]
+    },
+
+    "airgap_correction": {
+      "label": "Bearing renewal and realignment",
+      "action": "repair",
+      "category": "motor_mechanical",
+      "cost_eur": { "min": 40, "max": 100 },
+      "breakdown": {
+        "parts_eur": 8,
+        "parts_detail": "Eccentricity is a condition of the rotor-stator air gap rather than a failed component. It is corrected by renewing worn bearings and re-seating/realigning the end shields; severe cases with core rub are motor_replacement instead.",
+        "labour_hours": { "min": 2, "max": 3 },
+        "labour_rate": "motor_workshop"
+      },
+      "absorbs": ["bearing_replacement"],
+      "confidence": "medium",
+      "confidence_note": "Derived from parts plus workshop labour; no single published line item covers this job.",
+      "sources": ["rulmentika_6205", "electrician_rates_bucuresti"]
+    },
+
+    "supply_investigation": {
+      "label": "Investigate and correct supply imbalance",
+      "action": "repair",
+      "category": "electrical_supply",
+      "cost_eur": { "min": 30, "max": 80 },
+      "breakdown": {
+        "parts_eur": null,
+        "parts_detail": "No motor parts. This is switchgear/cabling/transformer-side work.",
+        "labour_hours": { "min": 1, "max": 2 },
+        "labour_rate": "authorised_electrician"
+      },
+      "confidence": "medium_high",
+      "important": "This is NOT a motor repair. Voltage unbalance originates upstream of the motor; dispatching a motor workshop would fix nothing while the real fault keeps damaging the machine. It belongs to a different trade and a different budget line, and should be reported separately from motor repair cost.",
+      "sources": ["electrician_rates_bucuresti", "daibau_electrician"]
+    }
+  },
+
+  "locations": {
+    "bearing_outer": {
+      "label": "Bearing - outer race",
+      "job": "bearing_replacement",
+      "note": "FleetSense does not identify which end (drive or non-drive) the fault sits on; both bearings are replaced regardless, so this does not affect cost."
+    },
+    "bearing_inner": {
+      "label": "Bearing - inner race",
+      "job": "bearing_replacement"
+    },
+    "bearing_ball": {
+      "label": "Bearing - rolling elements",
+      "job": "bearing_replacement"
+    },
+    "rotor_bar": {
+      "label": "Broken rotor bar",
+      "job": "motor_replacement",
+      "note": "Bar repair (welding/brazing replacement bars to the end rings) is a real service, quoted internationally at EUR 2800-14000, but it applies to large motors with fabricated copper cages. A 2.2 kW motor has a cast-aluminium cage, which industry guidance treats as non-repairable at any size -- replacement is the only sensible action."
+    },
+    "winding": {
+      "label": "Stator winding",
+      "job": "stator_rewind",
+      "note": "See the stator_rewind economic_note: rewind versus replace is genuinely borderline for a motor this small."
+    },
+    "bend": {
+      "label": "Bent shaft",
+      "job": "shaft_repair"
+    },
+    "static_eccentricity": {
+      "label": "Static eccentricity",
+      "job": "airgap_correction"
+    },
+    "dynamic_eccentricity": {
+      "label": "Dynamic eccentricity",
+      "job": "airgap_correction"
+    },
+    "voltage_unbalance": {
+      "label": "Supply voltage unbalance",
+      "job": "supply_investigation"
+    }
+  },
+
+  "sources": {
+    "profiairvent_rewind": {
+      "what": "Rewind of an electric motor up to 2 kW: 520 RON incl. VAT (430 excl.). Covers rewinding to manufacturer spec, bearing replacement, varnishing. 6-month warranty.",
+      "url": "https://profiairvent.ro/rebobinare-motor-electric"
+    },
+    "rulmentika_6205": {
+      "what": "SKF 6205-2Z/C3 deep groove ball bearing, 25x52x15 mm: 19.95 RON, in stock. This is the exact bearing named in the MCC5-THU dataset paper.",
+      "url": "https://www.rulmentika.ro/rulment-6205-2z-c3-skf.html"
+    },
+    "dedeman_motor": {
+      "what": "Gamak AGM2E 90 L 2, 2.2 kW / 3 CP three-phase, 2-pole, 2880 rpm, IP55, 83% efficiency: 723.00 RON.",
+      "url": "https://www.dedeman.ro/ro/motor-electric-trifazat-gamak-agm2e-90-l-2-2-2-kw-3-cp/p/1048736"
+    },
+    "ventsys_motor": {
+      "what": "Three-phase 2.2 kW, 1500 rpm (4-pole) motor: 2023.92 RON.",
+      "url": "https://www.vent-sys.ro/motoare-electrice-trifazate/Motor-electric-Trifazat-2-2-KW-1500-RPM-4058.html"
+    },
+    "electrician_rates_bucuresti": {
+      "what": "Romanian electrician hourly rates 2026: 100-150 RON/h Bucharest, 80-130 RON/h other major cities, 50-100 RON/h smaller towns; ANRE-authorised 100-200 RON/h.",
+      "url": "https://electricianbucuresti.com.ro/cat-costa-un-electrician-in-2026/"
+    },
+    "daibau_electrician": {
+      "what": "Independent 2026 Romanian labour price guide for electrical work, used to cross-check the rates above.",
+      "url": "https://www.daibau.ro/preturi/instalatii_electrice_electrician"
+    },
+    "industrialmonitor_repair_replace": {
+      "what": "Repair-vs-replace thresholds; rotor bar repair costs and the guidance that failed cast-aluminium rotor bars warrant replacement at any size.",
+      "url": "https://industrialmonitordirect.com/blogs/knowledgebase/ac-induction-motor-repair-vs-replace-decision-guide"
+    },
+    "universalrewind_repair_replace": {
+      "what": "Motors under ~15 HP are typically not repaired because minimum repair cost exceeds the ~57% threshold of a new motor's price.",
+      "url": "https://universalrewind.com/motor-repairs/electric-motor-repair-or-replace/"
+    },
+    "repairengineering_shaft": {
+      "what": "Shaft straightening as a service; background for the shaft_repair estimate. No Romanian pricing published.",
+      "url": "http://www.repairengineering.com/shaft-straightening.html"
+    }
+  }
+}

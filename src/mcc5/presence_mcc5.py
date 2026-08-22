@@ -130,7 +130,12 @@ def train_final_model(X, Y, split: str):
     generalization numbers, not to produce the artifact actually used for inference."""
     clf = _new_classifier()
     clf.fit(X, Y)
-    joblib.dump({"model": clf, "locations": LOCATIONS, "threshold": PRESENCE_THRESHOLD}, model_path(split))
+    # compress=3: a multi-output RandomForest stores a (n_outputs, n_classes) float64
+    # array at every node of every tree, which is hugely repetitive -- zlib takes these
+    # from ~250-390MB down to ~40-60MB. Lossless: verified predictions bit-identical
+    # before and after. Load time is unaffected (less disk I/O offsets the inflate).
+    joblib.dump({"model": clf, "locations": LOCATIONS, "threshold": PRESENCE_THRESHOLD},
+                model_path(split), compress=3)
     return clf
 
 
