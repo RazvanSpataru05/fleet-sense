@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FleetSense</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script>
+    // Runs before first paint: applies a previously chosen theme so the page never
+    // flashes light before switching to dark. No stored choice = fall through to the
+    // stylesheet's prefers-color-scheme handling.
+    (function () {
+      try {
+        var t = localStorage.getItem("fleetsense-theme");
+        if (t === "dark" || t === "light") {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch (e) { /* private mode / storage blocked -- fall back to system preference */ }
+    })();
+  </script>
+</head>
+
+<body>
+
+  <header class="masthead">
+    <div class="masthead-inner">
+      <div class="wordmark">Fleet<span>Sense</span></div>
+      <div class="masthead-sub">Motor current signature analysis</div>
+
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch colour theme"
+        title="Switch colour theme">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" />
+          <path
+            d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="shell">
+
+    <section class="panel">
+      <div class="panel-head">Recording</div>
+      <div class="panel-body">
+        <form id="form">
+          <div class="field">
+            <label class="field-label" for="file">Data file</label>
+            <label class="filepick" id="filepick">
+              <input type="file" id="file" name="file" accept=".csv,.txt">
+              <span class="filepick-name filepick-empty" id="filename">Choose a .csv or .txt file</span>
+            </label>
+            <p class="field-hint">Recording has to be minimum 60 secs.
+            </p>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="sample_rate">Sample rate (Hz)</label>
+            <input type="number" id="sample_rate" name="sample_rate" step="any" placeholder="12800">
+            <p class="field-hint">Only needed when the file has no <code>time</code> column.
+              A rate other than 12&nbsp;800&nbsp;Hz is rejected</p>
+          </div>
+
+          <div class="field">
+            <button class="btn" id="submit" type="submit">Analyse</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">Analysis</div>
+      <div id="result">
+        <div class="placeholder">No recording analysed yet.</div>
+      </div>
+    </section>
+
+    <section class="viewer-section" id="viewer-section" hidden>
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-head-row">
+            <span>Motor — component view</span>
+            <button class="ghost-btn" id="reset-view" type="button">Reset view</button>
+          </div>
+        </div>
+        <div class="viewer" id="viewer" tabindex="0">
+          <div class="motor-tip" id="motor-tip" hidden></div>
+        </div>
+        <div class="motor-detail" id="motor-detail"></div>
+        <div class="legend">
+          <span class="legend-item"><span class="swatch ok"></span>No fault detected</span>
+          <span class="legend-item"><span class="swatch low"></span>Low severity</span>
+          <span class="legend-item"><span class="swatch unknown"></span>Detected — severity not assessable</span>
+          <span class="legend-item"><span class="swatch high"></span>High severity</span>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "{{ url_for('static', filename='js/vendor/three.module.js') }}",
+        "three/addons/controls/OrbitControls.js": "{{ url_for('static', filename='js/vendor/controls/OrbitControls.js') }}"
+      }
+    }
+  </script>
+  <script type="module" src="{{ url_for('static', filename='js/motor.js') }}"></script>
+
+  <script>
+    const LOCATION_LABELS = {
+      bearing_outer: "Bearing — outer race",
+      bearing_inner: "Bearing — inner race",
+      bearing_ball: "Bearing — rolling element",
+      rotor_bar: "Broken rotor bar",
+      static_eccentricity: "Static eccentricity",
+      dynamic_eccentricity: "Dynamic eccentricity",
+      winding: "Stator winding",
+      voltage_unbalance: "Supply voltage unbalance",
+      bend: "Bent shaft",
+    };
+
+    // ---- theme toggle ----
+    document.getElementById("theme-toggle").addEventListener("click", () => {
+      const root = document.documentElement;
+      // No explicit choice yet? Read what the system is currently giving us, so the
+      // first click always flips away from what the user is actually looking at.
+      const current = root.getAttribute("data-theme")
+        || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      const next = current === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("fleetsense-theme", next); } catch (e) { /* storage blocked */ }
+    });
+
+    const form = document.getElementById("form");
+    const fileIn = document.getElementById("file");
+    const filepick = document.getElementById("filepick");
+    const filename = document.getElementById("filename");
+    const submit = document.getElementById("submit");
+    const result = document.getElementById("result");
+
+    fileIn.addEventListener("change", () => {
+      const f = fileIn.files[0];
+      filename.textContent = f ? f.name : "Choose a .csv or .txt file";
+      filename.classList.toggle("filepick-empty", !f);
+      filepick.classList.toggle("is-set", !!f);
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!fileIn.files[0]) return;
+
+      const body = new FormData();
+      body.append("file", fileIn.files[0]);
+      const rate = document.getElementById("sample_rate").value.trim();
+      if (rate) body.append("sample_rate", rate);
+
+      submit.disabled = true;
+      result.innerHTML =
+        '<div class="loading">' +
+        '<div class="loading-label">Uploading and analysing — this takes a few seconds for a full recording.</div>' +
+        '<div class="bar"></div>' +
+        '</div>';
+
+      try {
+        const res = await fetch("/analyze", { method: "POST", body });
+        render(await res.json());
+      } catch (err) {
+        render({ verdict: "error", reason: "Could not reach the server: " + err.message });
+      } finally {
+        submit.disabled = false;
+      }
+    });
+
+    const esc = (s) => String(s).replace(/[&<>"']/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    const viewerSection = document.getElementById("viewer-section");
+    let viewerReady = false;
+
+    // Built only once, and only when there's actually something to show -- no point
+    // spinning up a WebGL context for a visitor who never uploads anything.
+    function showViewer(issues) {
+      viewerSection.hidden = false;
+      if (!window.MotorViewer) return;   // module still loading; nothing to show yet
+      if (!viewerReady) {
+        window.MotorViewer.init(
+          document.getElementById("viewer"),
+          document.getElementById("motor-tip"),
+          document.getElementById("motor-detail")
+        );
+        viewerReady = true;
+      }
+      window.MotorViewer.update(issues);
+    }
+
+    document.getElementById("reset-view").addEventListener("click", () => {
+      if (viewerReady) window.MotorViewer.resetView();
+    });
+
+    function render(r) {
+      if (r.verdict === "rejected" || r.verdict === "cannot_process" || r.verdict === "error") {
+        viewerSection.hidden = true;
+        const title = r.verdict === "error" ? "Processing failed" : "File not accepted";
+        result.innerHTML =
+          '<div class="verdict ' + (r.verdict === "error" ? "critical" : "") + '">' +
+          '<div><div class="verdict-title">' + title + '</div></div>' +
+          '</div>' +
+          '<div class="reason">' + esc(r.reason || "No reason given.") + '</div>';
+        return;
+      }
+
+      const issues = r.issues || [];
+      const worst = issues.some((i) => i.severity === "high") ? "critical"
+        : issues.length ? "caution"
+          : r.layer1_anomalous ? "caution" : "ok";
+
+      let title, note;
+      if (r.verdict === "issues_detected") {
+        title = issues.length === 1 ? "1 issue detected" : issues.length + " issues detected";
+        note = r.layer1_anomalous
+          ? "Anomaly detection independently agrees this recording is abnormal."
+          : "Note: overall anomaly detection did not flag this recording — the finding below comes from per-location analysis alone.";
+      } else if (r.verdict === "anomaly_detected_unattributed") {
+        title = "Anomaly detected — cause not identified";
+        note = "The recording is abnormal, but it does not match any fault signature the system can localise.";
+      } else {
+        title = "No issue detected";
+        note = "Neither overall anomaly detection nor per-location analysis flagged this recording.";
+      }
+
+      const c = r.condition_detected || {};
+      const meta = [
+        ["Regime", r.regime === "torque_circulation" ? "Constant speed" : "Constant torque"],
+        ["Load", c.torque_nm != null ? c.torque_nm + " Nm" : "—"],
+        ["Speed", c.rpm != null ? c.rpm + " rpm" : "—"],
+        ["Duration", r.duration_sec != null ? r.duration_sec + " s" : "—"],
+        ["Sample rate", r.sample_rate != null ? (r.sample_rate / 1000) + " kHz" : "—"],
+        ["Anomaly index", r.layer1_anomaly_ratio != null ? r.layer1_anomaly_ratio + "×" : "—"],
+      ].map(([k, v]) =>
+        '<div class="meta-cell"><div class="meta-key">' + k + '</div>' +
+        '<div class="meta-val">' + esc(v) + '</div></div>').join("");
+
+      const rows = issues.map((i) => {
+        const label = LOCATION_LABELS[i.location] || i.location;
+        const pct = Math.round((i.presence_confidence || 0) * 100);
+
+        let tag;
+        if (i.severity === "high") tag = '<span class="tag high">High severity</span>';
+        else if (i.severity === "low") tag = '<span class="tag low">Low severity</span>';
+        else tag = '<span class="tag unknown">Severity n/a</span>';
+
+        return '<div class="issue">' +
+          '<div class="issue-top">' +
+          '<div class="issue-name">' + esc(label) + '</div>' +
+          '<div class="issue-meta">' + tag +
+          '<span class="confidence">' + pct + '% confidence</span>' +
+          '</div>' +
+          '</div>' +
+          '<div class="meter"><div class="meter-fill" style="width:' + pct + '%"></div></div>' +
+          (i.caveat ? '<div class="caveat">' + esc(i.caveat) + '</div>' : "") +
+          '</div>';
+      }).join("");
+
+      result.innerHTML =
+        '<div class="verdict ' + worst + '">' +
+        '<div><div class="verdict-title">' + esc(title) + '</div>' +
+        '<div class="verdict-note">' + esc(note) + '</div></div>' +
+        '</div>' +
+        '<div class="meta">' + meta + '</div>' +
+        (rows ? '<div class="issues">' + rows + '</div>' : "") +
+        '<div class="footnote">Severity is only assessed for bearing faults; other locations are reported as presence only.</div>';
+
+      // Shown for every completed analysis, healthy or not.
+      showViewer(issues);
+    }
+  </script>
+
+</body>
+
+</html>

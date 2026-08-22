@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template
 
 MCC5_DIR = Path(__file__).resolve().parent.parent / "src" / "mcc5"
 sys.path.insert(0, str(MCC5_DIR))
@@ -19,22 +19,10 @@ from pipeline_mcc5 import check_motor  # noqa: E402
 
 app = Flask(__name__)
 
-UPLOAD_FORM = """
-<!doctype html>
-<title>FleetSense</title>
-<h1>FleetSense -- upload a recording</h1>
-<form method=post enctype=multipart/form-data action="/analyze">
-  <p><input type=file name=file></p>
-  <p>Sample rate (Hz) -- only needed if the file has no "time" column:
-     <input type=number name=sample_rate step=any></p>
-  <p><input type=submit value=Analyze></p>
-</form>
-"""
-
 
 @app.route("/")
 def index():
-    return render_template_string(UPLOAD_FORM)
+    return render_template("index.html")
 
 
 ALLOWED_EXTENSIONS = {".csv", ".txt"}
