@@ -47,11 +47,26 @@ def parse_filename(csv_path: Path) -> dict:
     }
 
 
+# Known-bad recording, excluded everywhere. Its current_a RMS (0.285) runs 40-70% above
+# every comparable reference: its own 5 same-fault siblings at other conditions (0.158-
+# 0.216) and its 5 same-condition peers at other fault types (a tight 0.169-0.172) -- not
+# an isolated torque-sensor quirk (which is how it first surfaced, via a broken auto-
+# detected torque_nm), the whole recording looks atypical. Consistent with being captured
+# ~7 weeks after every other file at this exact condition (250821 vs 250702-250708),
+# likely a different calibration/rig state. Treated as an accepted data gap for
+# bearing_outer_H at 20Nm/3000rpm specifically, the same way bearing_inner_H's missing
+# file at that same condition already is -- not something to silently keep and let corrupt
+# training data for that fault+condition combination.
+EXCLUDED_FILES = {"bearing_outer_H_torque_circulation_20Nm_3000rpm_250821175544.csv"}
+
+
 def list_files(fault: str = None, torque_nm: int = None, rpm: int = None, split: str = None) -> list:
     dirs = SPLIT_DIRS.values() if split is None else [SPLIT_DIRS[split]]
     files = sorted(f for d in dirs for f in d.glob("*.csv"))
     result = []
     for f in files:
+        if f.name in EXCLUDED_FILES:
+            continue
         meta = parse_filename(f)
         if fault is not None and meta["fault"] != fault:
             continue

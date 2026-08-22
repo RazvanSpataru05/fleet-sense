@@ -39,7 +39,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import precision_recall_fscore_support
 
 from envelope_dataset_mcc5 import artifacts_dir
-from classifier_mcc5 import build_dataset, SPLIT, CONDITIONS
+from classifier_mcc5 import build_dataset, CONDITIONS
 
 LOCATIONS = [
     "bearing_ball", "bearing_inner", "bearing_outer", "bend", "rotor_bar",
@@ -48,7 +48,11 @@ LOCATIONS = [
 
 PRESENCE_THRESHOLD = 0.3  # tuned down from the RF default of 0.5 -- see module docstring
 
-MODEL_PATH = artifacts_dir(SPLIT) / "presence_model.pkl"
+SPLITS = ("torque_circulation", "speed_circulation")
+
+
+def model_path(split: str):
+    return artifacts_dir(split) / "presence_model.pkl"
 
 
 def fault_set(name: str) -> set:
@@ -120,13 +124,13 @@ def report(file_true, file_pred_probs, threshold=PRESENCE_THRESHOLD):
         print(f"  {loc:22s} precision={prec[i]:.3f}  recall={rec[i]:.3f}  f1={f1[i]:.3f}  n_true={support[i]}")
 
 
-def train_final_model(X, Y):
+def train_final_model(X, Y, split: str):
     """Trained on ALL available data (no holdout) -- this is the deployable model, distinct
     from the leave-one-condition-out validation above which exists to report honest
     generalization numbers, not to produce the artifact actually used for inference."""
     clf = _new_classifier()
     clf.fit(X, Y)
-    joblib.dump({"model": clf, "locations": LOCATIONS, "threshold": PRESENCE_THRESHOLD}, MODEL_PATH)
+    joblib.dump({"model": clf, "locations": LOCATIONS, "threshold": PRESENCE_THRESHOLD}, model_path(split))
     return clf
 
 
@@ -141,16 +145,18 @@ def predict_presence(model, X) -> dict:
 
 
 def main():
-    X, y, torque_nm, rpm = build_dataset()
-    torque_nm, rpm = torque_nm.astype(int), rpm.astype(int)
-    Y = build_multi_label(y)
+    for split in SPLITS:
+        print(f"\n########## {split} ##########")
+        X, y, torque_nm, rpm = build_dataset(split=split)
+        torque_nm, rpm = torque_nm.astype(int), rpm.astype(int)
+        Y = build_multi_label(y)
 
-    file_true, file_pred_probs, file_names = validate_leave_one_condition_out(X, Y, torque_nm, rpm, y)
-    report(file_true, file_pred_probs)
+        file_true, file_pred_probs, file_names = validate_leave_one_condition_out(X, Y, torque_nm, rpm, y)
+        report(file_true, file_pred_probs)
 
-    print("\ntraining final deployable model on all available data...")
-    train_final_model(X, Y)
-    print(f"saved to {MODEL_PATH}")
+        print("\ntraining final deployable model on all available data...")
+        train_final_model(X, Y, split)
+        print(f"saved to {model_path(split)}")
 
 
 if __name__ == "__main__":

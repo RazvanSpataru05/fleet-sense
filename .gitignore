@@ -3,6 +3,7 @@ __pycache__
 dataset
 *.pkl
 *.npy
+*.npz
 .ipynb_checkpoints
 .DS_Store
 Thumbs.db

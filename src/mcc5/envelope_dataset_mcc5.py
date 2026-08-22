@@ -11,19 +11,20 @@ envelope-spectrum band from the first pass -- the targeted features should carry
 real signal for bearing-related faults, while the wide band is kept for fault types
 that don't have a known formula yet (rotor bar, eccentricity, winding).
 
-Scoped to a single operating condition (20Nm, 1000rpm) for the same reason we scoped
-Paderborn to one condition -- mixing conditions dilutes the anomaly signal.
+Originally scoped to a single operating condition (20Nm, 1000rpm), for the same reason
+Paderborn was scoped to one condition -- mixing conditions dilutes the anomaly signal.
+Later extended to work across all 6 real conditions (2 torque levels x 3 RPMs) once RPM-
+adaptive frequency search (see FUNDAMENTAL_SEARCH_MARGIN_HZ) made that safe -- see
+classifier_mcc5.py, presence_mcc5.py, severity_mcc5.py, and anomaly_mcc5.py, which all
+extract features across every condition rather than just one.
 """
 from pathlib import Path
 
-import joblib
 import numpy as np
 from scipy.signal import hilbert
 from scipy.stats import kurtosis
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 
-from load_mcc5 import FS, SPLIT_DIRS, list_files, list_fault_types, load_recording, parse_filename
+from load_mcc5 import FS, list_files, load_recording, parse_filename
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -36,10 +37,6 @@ def artifacts_dir(split: str) -> Path:
     avoids that confound entirely instead of trying to correct for it after the fact."""
     return BASE_DIR / "artifacts" / "envelope" / split
 
-
-CONDITION = {"torque_nm": 20, "rpm": 1000}
-RANDOM_STATE = 42
-VAL_SIZE = 0.2
 
 WINDOW_SEC = 0.5
 OVERLAP = 0.5
@@ -70,25 +67,6 @@ BEARING_FAULT_RATIOS = {"bpfo": 3.585, "bpfi": 5.415, "bsf": 2.357}
 TARGETED_FAULT_WINDOW_HZ = 2.0  # +/- search window around each target frequency
 
 CURRENT_CHANNELS = ["current_a", "current_b", "current_c"]
-
-
-def healthy_file(split: str) -> Path:
-    files = list_files(fault="health", split=split, **CONDITION)
-    assert len(files) == 1, f"expected exactly one healthy file for split={split}, got {len(files)}"
-    return files[0]
-
-
-def condition_files(split: str) -> list:
-    return list_files(split=split, **CONDITION)
-
-
-def split_rows(rows, val_size=VAL_SIZE):
-    """Window-level, chronological (not shuffled) split within the single healthy
-    recording available for this split+condition. Chronological rather than random:
-    with 50% window overlap, a random shuffle would scatter near-duplicate neighboring
-    windows across both train and val, leaking information between them. A time-ordered
-    split confines the overlap to the single boundary between the two halves."""
-    return train_test_split(rows, test_size=val_size, shuffle=False)
 
 
 def window_signal(signal, window_samples=WINDOW_SAMPLES, stride_samples=STRIDE_SAMPLES):
@@ -123,9 +101,59 @@ def shaft_hz_for_file(df, nominal_rpm: float) -> float:
     detection got noticeably unstable in spot checks (dropped to 10-15Hz instead of
     ~16.7Hz in some 10s slices). The full recording gives ~0.011Hz resolution and a
     stable estimate that's reused for every window in that file. nominal_rpm (from the
-    filename) picks the search band -- see fundamental_search_band."""
+    filename, or auto-detected -- see detect_condition_from_data) picks the search band
+    -- see fundamental_search_band."""
     freqs, magnitude = compute_fft(df["current_a"].values)
     return detect_fundamental_hz(freqs, magnitude, band=fundamental_search_band(nominal_rpm))
+
+
+# Real deployment can't trust a filename to already know the operating condition -- a
+# genuine upload won't be named "fault_40Nm_2000rpm.csv". These auto-detect torque/RPM
+# straight from the recording's own data instead, so windows_for_file never has to parse
+# a filename for anything except building our OWN labeled training set.
+BLIND_SEARCH_BAND = (10.0, 60.0)  # wide enough to contain all 3 known RPMs' nominal
+# frequencies (16.7, 33.3, 50.0 Hz) with margin, so the fundamental can be found without
+# knowing the RPM first -- unlike fundamental_search_band, which needs it already known.
+KNOWN_NOMINAL_RPMS = (1000, 2000, 3000)
+KNOWN_TORQUE_LEVELS_NM = (20, 40)
+
+# The "torque" column is NOT recorded in Nm -- it's some other, unlabeled unit (a per-unit
+# fraction of rated torque, most likely). Checked directly against every file's true label:
+# abs(torque.mean()) clusters at ~0.17-0.24 for real 20Nm runs and ~0.40-0.61 for real 40Nm
+# runs, in BOTH splits, with a wide empty gap between -- so a single threshold in the middle
+# separates them cleanly. abs() specifically because some recording sessions show a flipped
+# sign convention on this channel (same kind of per-session wiring/convention inconsistency
+# already found and fixed for negative-sequence current) -- without abs(), health-only checks
+# looked clean but the full 24-fault-type sweep showed real overlap purely from sign flips.
+# One single file across all 288 (bearing_outer_H_torque_circulation_20Nm_3000rpm, recorded
+# ~7 weeks after every other file at that exact condition) reads 0.734 -- 4x its 23 same-
+# condition siblings (all 0.17-0.19) -- a flagged, isolated data anomaly in the raw dataset,
+# not something this threshold is tuned to paper over.
+TORQUE_DETECTION_THRESHOLD = 0.3
+
+
+def detect_condition_from_data(df) -> dict:
+    """Two-pass frequency detection: a wide blind search first, just to work out WHICH of
+    the known RPMs this recording is running at, then the existing precise narrow-band
+    search (shaft_hz_for_file) centered on that RPM for the same clean estimate a labeled
+    file would get. Torque uses the recording's own "torque" column directly -- see
+    TORQUE_DETECTION_THRESHOLD above for why it's a threshold on the magnitude, not a
+    literal Nm readout."""
+    freqs, magnitude = compute_fft(df["current_a"].values)
+    f_e_rough = detect_fundamental_hz(freqs, magnitude, band=BLIND_SEARCH_BAND)
+
+    nominal_hz_by_rpm = {rpm: rpm / 60.0 for rpm in KNOWN_NOMINAL_RPMS}
+    inferred_rpm = min(nominal_hz_by_rpm, key=lambda rpm: abs(nominal_hz_by_rpm[rpm] - f_e_rough))
+
+    torque_measured = float(df["torque"].mean())
+    inferred_torque_nm = 40 if abs(torque_measured) >= TORQUE_DETECTION_THRESHOLD else 20
+
+    return {
+        "rpm": inferred_rpm,
+        "torque_nm": inferred_torque_nm,
+        "detected_f_e_rough": f_e_rough,
+        "torque_measured": torque_measured,
+    }
 
 
 def bearing_fault_frequencies(shaft_hz: float, ratios=BEARING_FAULT_RATIOS) -> dict:
@@ -276,13 +304,20 @@ def envelope_stats(envelope) -> dict:
     }
 
 
-def windows_for_file(csv_path: Path) -> list:
+def windows_for_file(csv_path: Path, torque_nm: int = None, rpm: int = None) -> list:
+    """torque_nm/rpm default to parsing the filename (used everywhere in this project
+    to build our OWN labeled training/validation sets, where that's legitimate ground
+    truth). Pass them explicitly -- e.g. from detect_condition_from_data() via
+    windows_for_file_blind() -- to diagnose a real, unlabeled recording instead."""
     df = load_recording(csv_path)
-    meta = parse_filename(csv_path)
+    if torque_nm is None or rpm is None:
+        meta = parse_filename(csv_path)
+        torque_nm = meta["torque_nm"] if torque_nm is None else torque_nm
+        rpm = meta["rpm"] if rpm is None else rpm
 
-    shaft_hz = shaft_hz_for_file(df, meta["rpm"])
+    shaft_hz = shaft_hz_for_file(df, rpm)
     fault_freqs = bearing_fault_frequencies(shaft_hz)
-    rotor_bar_mag = rotor_bar_magnitude_for_file(df, shaft_hz, meta["rpm"])
+    rotor_bar_mag = rotor_bar_magnitude_for_file(df, shaft_hz, rpm)
     neg_seq_mag = negative_sequence_magnitude_for_file(df, shaft_hz)
     eccentricity_hz = static_eccentricity_frequency(shaft_hz)
 
@@ -315,9 +350,18 @@ def windows_for_file(csv_path: Path) -> list:
             row.append(rotor_bar_mag[ch])  # per-file constant, not per-window (see above)
             row.append(targeted_fault_magnitude(freqs, magnitude, eccentricity_hz))
         row.append(neg_seq_mag)  # cross-phase, per-file constant -- one value, not per-channel
-        row.extend([meta["torque_nm"], meta["rpm"], torque_measured, shaft_hz])
+        row.extend([torque_nm, rpm, torque_measured, shaft_hz])
         rows.append(row)
     return rows
+
+
+def windows_for_file_blind(csv_path: Path) -> list:
+    """Real-inference entrypoint: don't parse the filename for anything. Auto-detects
+    torque/RPM from the recording's own data (detect_condition_from_data), then reuses
+    the exact same feature pipeline every labeled training file goes through."""
+    df = load_recording(csv_path)
+    condition = detect_condition_from_data(df)
+    return windows_for_file(csv_path, torque_nm=condition["torque_nm"], rpm=condition["rpm"])
 
 
 def build_matrix(files) -> np.ndarray:
@@ -327,35 +371,3 @@ def build_matrix(files) -> np.ndarray:
     return np.array(rows)
 
 
-def build_for_split(split: str):
-    print(f"=== {split} ===")
-    f = healthy_file(split)
-    print(f"healthy file: {f.name}")
-
-    rows = windows_for_file(f)
-    print(f"total windows: {len(rows)}")
-
-    train_rows, val_rows = split_rows(rows)
-    X_train_raw = np.array(train_rows)
-    X_val_raw = np.array(val_rows)
-    print(f"train windows: {X_train_raw.shape}  val windows: {X_val_raw.shape}")
-
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train_raw)
-    X_val = scaler.transform(X_val_raw)
-
-    out_dir = artifacts_dir(split)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    joblib.dump(scaler, out_dir / "scaler_envelope.pkl")
-    np.save(out_dir / "X_train_envelope.npy", X_train)
-    np.save(out_dir / "X_val_envelope.npy", X_val)
-    print(f"Saved to {out_dir}\n")
-
-
-def main():
-    for split in SPLIT_DIRS:
-        build_for_split(split)
-
-
-if __name__ == "__main__":
-    main()

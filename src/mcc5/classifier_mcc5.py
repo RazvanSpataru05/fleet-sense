@@ -41,14 +41,22 @@ from envelope_dataset_mcc5 import windows_for_file, artifacts_dir
 SPLIT = "torque_circulation"
 CONDITIONS = [(t, r) for t in (20, 40) for r in (1000, 2000, 3000)]
 
+
+def cache_file(split: str):
+    cache_dir = artifacts_dir(split) / "classifier_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / "multi_condition_dataset.npz"
+
+
+# kept for backwards compatibility with existing callers that import these directly
 CACHE_DIR = artifacts_dir(SPLIT) / "classifier_cache"
-CACHE_FILE = CACHE_DIR / "multi_condition_dataset.npz"
+CACHE_FILE = cache_file(SPLIT)
 
 
 def build_dataset(split=SPLIT, force=False):
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    if CACHE_FILE.exists() and not force:
-        data = np.load(CACHE_FILE, allow_pickle=True)
+    cf = cache_file(split)
+    if cf.exists() and not force:
+        data = np.load(cf, allow_pickle=True)
         return data["X"], data["y"], data["torque_nm"], data["rpm"]
 
     X_list, y_list, torque_list, rpm_list = [], [], [], []
@@ -70,7 +78,7 @@ def build_dataset(split=SPLIT, force=False):
     y = np.array(y_list)
     torque_nm = np.array(torque_list)
     rpm = np.array(rpm_list)
-    np.savez(CACHE_FILE, X=X, y=y, torque_nm=torque_nm, rpm=rpm)
+    np.savez(cf, X=X, y=y, torque_nm=torque_nm, rpm=rpm)
     return X, y, torque_nm, rpm
 
 

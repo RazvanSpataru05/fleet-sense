@@ -39,9 +39,9 @@ import joblib
 
 from sklearn.ensemble import RandomForestClassifier
 
-from envelope_dataset_mcc5 import windows_for_file, artifacts_dir
-from classifier_mcc5 import build_dataset, SPLIT, CONDITIONS
-from presence_mcc5 import PRESENCE_THRESHOLD, MODEL_PATH as PRESENCE_MODEL_PATH, predict_presence
+from envelope_dataset_mcc5 import windows_for_file_blind, artifacts_dir
+from classifier_mcc5 import build_dataset, CONDITIONS
+from presence_mcc5 import SPLITS, PRESENCE_THRESHOLD, model_path as presence_model_path, predict_presence
 
 BEARING_SEVERITY_LOCATIONS = {
     "bearing_outer": ("bearing_outer_H", "bearing_outer_L"),
@@ -49,7 +49,9 @@ BEARING_SEVERITY_LOCATIONS = {
     "bearing_ball": ("bearing_ball_H", "bearing_ball_L"),
 }
 
-SEVERITY_MODEL_PATH = artifacts_dir(SPLIT) / "severity_models.pkl"
+
+def severity_model_path(split: str):
+    return artifacts_dir(split) / "severity_models.pkl"
 
 
 def _new_classifier() -> RandomForestClassifier:
@@ -87,7 +89,7 @@ def validate_severity(X, y, torque_nm, rpm):
     return results
 
 
-def train_final_models(X, y, torque_nm, rpm):
+def train_final_models(X, y, torque_nm, rpm, split: str):
     """Trained on ALL available pure H/L files per location (no holdout) -- these are the
     deployable models; validate_severity() above exists only to report honest generalization
     numbers separately."""
@@ -97,21 +99,26 @@ def train_final_models(X, y, torque_nm, rpm):
         clf = _new_classifier()
         clf.fit(Xs, ys)
         models[location] = clf
-    joblib.dump(models, SEVERITY_MODEL_PATH)
+    joblib.dump(models, severity_model_path(split))
     return models
 
 
-def diagnose_file(csv_path, presence_model=None, severity_models=None):
+def diagnose_file(csv_path, split: str, presence_model=None, severity_models=None):
     """Full inference entrypoint: extract features from one uploaded recording, run
     presence detection across all 9 locations, then severity for any bearing location
     that comes back present. Returns a plain list of detected-issue dicts, ready to hand
-    to a UI layer -- no plotting or coloring decisions made here."""
+    to a UI layer -- no plotting or coloring decisions made here. `split` selects which
+    regime's models to use (speed_circulation vs torque_circulation) -- the caller is
+    expected to have already routed the file via the regime detector. Uses
+    windows_for_file_blind(), NOT windows_for_file() -- a real upload's filename can't be
+    trusted to carry its own operating condition, so torque/RPM are auto-detected from
+    the recording's own data instead (see detect_condition_from_data)."""
     if presence_model is None:
-        presence_model = joblib.load(PRESENCE_MODEL_PATH)["model"]
+        presence_model = joblib.load(presence_model_path(split))["model"]
     if severity_models is None:
-        severity_models = joblib.load(SEVERITY_MODEL_PATH)
+        severity_models = joblib.load(severity_model_path(split))
 
-    rows = windows_for_file(csv_path)
+    rows = windows_for_file_blind(csv_path)
     X = np.array(rows)
 
     presence = predict_presence(presence_model, X)
@@ -133,16 +140,18 @@ def diagnose_file(csv_path, presence_model=None, severity_models=None):
 
 
 def main():
-    X, y, torque_nm, rpm = build_dataset()
-    torque_nm, rpm = torque_nm.astype(int), rpm.astype(int)
+    for split in SPLITS:
+        print(f"\n########## {split} ##########")
+        X, y, torque_nm, rpm = build_dataset(split=split)
+        torque_nm, rpm = torque_nm.astype(int), rpm.astype(int)
 
-    print("=== severity validation (leave-one-condition-out) ===")
-    for location, (acc, n) in validate_severity(X, y, torque_nm, rpm).items():
-        print(f"  {location:15s} accuracy={acc:.3f}  (n={n})")
+        print("=== severity validation (leave-one-condition-out) ===")
+        for location, (acc, n) in validate_severity(X, y, torque_nm, rpm).items():
+            print(f"  {location:15s} accuracy={acc:.3f}  (n={n})")
 
-    print("\ntraining final deployable severity models on all available data...")
-    train_final_models(X, y, torque_nm, rpm)
-    print(f"saved to {SEVERITY_MODEL_PATH}")
+        print("\ntraining final deployable severity models on all available data...")
+        train_final_models(X, y, torque_nm, rpm, split)
+        print(f"saved to {severity_model_path(split)}")
 
 
 if __name__ == "__main__":
