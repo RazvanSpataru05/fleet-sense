@@ -103,23 +103,16 @@ def train_final_models(X, y, torque_nm, rpm, split: str):
     return models
 
 
-def diagnose_file(csv_path, split: str, presence_model=None, severity_models=None):
-    """Full inference entrypoint: extract features from one uploaded recording, run
-    presence detection across all 9 locations, then severity for any bearing location
-    that comes back present. Returns a plain list of detected-issue dicts, ready to hand
-    to a UI layer -- no plotting or coloring decisions made here. `split` selects which
-    regime's models to use (speed_circulation vs torque_circulation) -- the caller is
-    expected to have already routed the file via the regime detector. Uses
-    windows_for_file_blind(), NOT windows_for_file() -- a real upload's filename can't be
-    trusted to carry its own operating condition, so torque/RPM are auto-detected from
-    the recording's own data instead (see detect_condition_from_data)."""
+def diagnose_features(X, split: str, presence_model=None, severity_models=None) -> list:
+    """Core Layer 2 logic given an already-extracted feature matrix -- split out from
+    diagnose_file() so an orchestrator that also needs X for Layer 1 (see pipeline_mcc5.py)
+    doesn't have to extract features twice for the same file. Returns a plain list of
+    detected-issue dicts (empty if nothing crosses the presence threshold) -- no "healthy"
+    sentinel here, that framing is the caller's job (it depends on what Layer 1 says too)."""
     if presence_model is None:
         presence_model = joblib.load(presence_model_path(split))["model"]
     if severity_models is None:
         severity_models = joblib.load(severity_model_path(split))
-
-    rows = windows_for_file_blind(csv_path)
-    X = np.array(rows)
 
     presence = predict_presence(presence_model, X)
 
@@ -136,6 +129,18 @@ def diagnose_file(csv_path, split: str, presence_model=None, severity_models=Non
             issue["severity"] = "not assessable (no severity model for this location)"
         issues.append(issue)
 
+    return issues
+
+
+def diagnose_file(csv_path, split: str, presence_model=None, severity_models=None):
+    """Standalone Layer-2-only entrypoint: extract features from one uploaded recording
+    (windows_for_file_blind -- no filename metadata trusted, torque/RPM auto-detected from
+    the recording's own data) and run diagnose_features() on them. Kept for direct/manual
+    use; pipeline_mcc5.check_motor() is the real full Layer 1 -> Layer 2 entrypoint and
+    calls diagnose_features() itself to avoid extracting features twice."""
+    rows = windows_for_file_blind(csv_path)
+    X = np.array(rows)
+    issues = diagnose_features(X, split, presence_model, severity_models)
     return issues if issues else [{"location": "none", "presence_confidence": None, "severity": "healthy"}]
 
 

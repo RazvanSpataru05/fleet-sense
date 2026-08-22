@@ -304,12 +304,18 @@ def envelope_stats(envelope) -> dict:
     }
 
 
-def windows_for_file(csv_path: Path, torque_nm: int = None, rpm: int = None) -> list:
+def windows_for_file(csv_path: Path, torque_nm: int = None, rpm: int = None, df=None) -> list:
     """torque_nm/rpm default to parsing the filename (used everywhere in this project
     to build our OWN labeled training/validation sets, where that's legitimate ground
     truth). Pass them explicitly -- e.g. from detect_condition_from_data() via
-    windows_for_file_blind() -- to diagnose a real, unlabeled recording instead."""
-    df = load_recording(csv_path)
+    windows_for_file_blind() -- to diagnose a real, unlabeled recording instead.
+
+    df: pass an already-loaded/validated DataFrame (e.g. from upload_validation_mcc5) to
+    skip re-loading via load_recording(), which only understands the raw dataset's fixed
+    9-column positional format -- a real upload validated with a header/name-matched
+    schema needs its already-resolved DataFrame used as-is, not reloaded from scratch."""
+    if df is None:
+        df = load_recording(csv_path)
     if torque_nm is None or rpm is None:
         meta = parse_filename(csv_path)
         torque_nm = meta["torque_nm"] if torque_nm is None else torque_nm
@@ -355,13 +361,16 @@ def windows_for_file(csv_path: Path, torque_nm: int = None, rpm: int = None) -> 
     return rows
 
 
-def windows_for_file_blind(csv_path: Path) -> list:
+def windows_for_file_blind(csv_path: Path, df=None) -> list:
     """Real-inference entrypoint: don't parse the filename for anything. Auto-detects
     torque/RPM from the recording's own data (detect_condition_from_data), then reuses
-    the exact same feature pipeline every labeled training file goes through."""
-    df = load_recording(csv_path)
+    the exact same feature pipeline every labeled training file goes through. Pass an
+    already-loaded/validated df (see upload_validation_mcc5) to avoid re-loading via
+    load_recording(), which only understands the raw dataset's fixed column layout."""
+    if df is None:
+        df = load_recording(csv_path)
     condition = detect_condition_from_data(df)
-    return windows_for_file(csv_path, torque_nm=condition["torque_nm"], rpm=condition["rpm"])
+    return windows_for_file(csv_path, torque_nm=condition["torque_nm"], rpm=condition["rpm"], df=df)
 
 
 def build_matrix(files) -> np.ndarray:

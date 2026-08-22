@@ -26,6 +26,13 @@ SPLIT_DIRS = {
 FS = 12800  # Hz, confirmed from the recordings' own time column
 COLUMNS = ["time", "speed", "torque", "vib_x", "vib_y", "vib_z", "current_a", "current_b", "current_c"]
 
+# Every model/feature in this project only ever reads these 4 -- confirmed by grepping
+# every module for direct column access. "time", "speed", and all 3 vibration channels
+# are recorded in the dataset but never used anywhere (speed was tried and explicitly
+# rejected as a feature source early on -- see regime_detector.py's docstring). This is
+# what a real upload actually needs to provide; see upload_validation_mcc5.py.
+REQUIRED_COLUMNS = ["current_a", "current_b", "current_c", "torque"]
+
 # e.g. "bearing_outer_H_and_inner_H_speed_circulation_40Nm_2000rpm_250702150458"
 # or   "health_torque_circulation_20Nm_1000rpm_250702154813d"  (torque_circulation
 # timestamps carry a trailing "d")
