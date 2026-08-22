@@ -136,10 +136,11 @@ def resolve_sample_rate(df: pd.DataFrame, declared_sample_rate: float = None) ->
         source = "user_declared"
     else:
         raise UploadValidationError(
-            f"Cannot determine this file's sample rate: it has no 'time' column, and none "
-            f"was provided. Please confirm the recording's sample rate before proceeding "
-            f"(the models expect {FS}Hz -- a different rate will silently produce wrong "
-            f"results, not just less accurate ones)."
+            f"This file has no 'time' column, so its sample rate cannot be verified from "
+            f"the data. Add a 'time' column and upload again. (The models are built around "
+            f"{FS}Hz; assuming a rate we cannot check would produce confidently wrong "
+            f"results rather than merely less accurate ones. A caller using the API "
+            f"directly may instead pass an explicit sample rate.)"
         )
 
     relative_error = abs(sample_rate - FS) / FS

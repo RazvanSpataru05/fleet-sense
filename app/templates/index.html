@@ -28,6 +28,11 @@
       <div class="wordmark">Fleet<span>Sense</span></div>
       <div class="masthead-sub">Motor current signature analysis</div>
 
+      <div class="masthead-user">
+        <span><strong>{{ current_user.factory_name }}</strong> · {{ current_user.email }}</span>
+        <a href="{{ url_for('logout') }}">Sign out</a>
+      </div>
+
       <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch colour theme"
         title="Switch colour theme">
         <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -51,6 +56,13 @@
       <div class="panel-body">
         <form id="form">
           <div class="field">
+            <label class="field-label" for="motor_label">Motor</label>
+            <input type="text" id="motor_label" name="motor_label" maxlength="120"
+                   placeholder="e.g. Line 3 feed pump">
+            <p class="field-hint">Optional. Defaults to the file name.</p>
+          </div>
+
+          <div class="field">
             <label class="field-label" for="file">Data file</label>
             <label class="filepick" id="filepick">
               <input type="file" id="file" name="file" accept=".csv,.txt">
@@ -60,11 +72,10 @@
             </p>
           </div>
 
-          <div class="field">
-            <label class="field-label" for="sample_rate">Sample rate (Hz)</label>
-            <input type="number" id="sample_rate" name="sample_rate" step="any" placeholder="12800">
-            <p class="field-hint">Only needed when the file has no <code>time</code> column.
-              A rate other than 12&nbsp;800&nbsp;Hz is rejected</p>
+          <div class="notice">
+            The sample rate is read from the recording itself. Anything other than
+            12.8&nbsp;kHz is rejected. The models are built around this rate and a
+            different one produces confidently wrong results rather than less accurate ones.
           </div>
 
           <div class="field">
@@ -85,7 +96,7 @@
       <div class="panel">
         <div class="panel-head">
           <div class="panel-head-row">
-            <span>Motor — component view</span>
+            <span>Motor Component View</span>
             <button class="ghost-btn" id="reset-view" type="button">Reset view</button>
           </div>
         </div>
@@ -96,7 +107,7 @@
         <div class="legend">
           <span class="legend-item"><span class="swatch ok"></span>No fault detected</span>
           <span class="legend-item"><span class="swatch low"></span>Low severity</span>
-          <span class="legend-item"><span class="swatch unknown"></span>Detected — severity not assessable</span>
+          <span class="legend-item"><span class="swatch unknown"></span>Detected (Severity not assessable)</span>
           <span class="legend-item"><span class="swatch high"></span>High severity</span>
         </div>
       </div>
@@ -159,13 +170,17 @@
 
       const body = new FormData();
       body.append("file", fileIn.files[0]);
-      const rate = document.getElementById("sample_rate").value.trim();
-      if (rate) body.append("sample_rate", rate);
+      const label = document.getElementById("motor_label").value.trim();
+      if (label) body.append("motor_label", label);
+      // No sample_rate field: the rate is derived from the recording's own time column.
+      // The API still accepts an explicit `sample_rate` for programmatic callers -- it
+      // just isn't something a UI user should be asked to assert, since 12800 is the
+      // only value that would ever pass.
 
       submit.disabled = true;
       result.innerHTML =
         '<div class="loading">' +
-        '<div class="loading-label">Uploading and analysing — this takes a few seconds for a full recording.</div>' +
+        '<div class="loading-label">Uploading and analysing. This takes a few seconds for a full recording.</div>' +
         '<div class="bar"></div>' +
         '</div>';
 
@@ -205,6 +220,70 @@
       if (viewerReady) window.MotorViewer.resetView();
     });
 
+    const euro = (b) => "€" + b.min + "–" + b.max;
+
+    // Per-issue repair cost. A job reached from two detections of the same physical part,
+    // or already priced inside a larger job, is shown struck through -- the figure is real
+    // but must not be added again, and hiding it would look like a gap.
+    function costBlock(c) {
+      if (!c || !c.costed) return "";
+
+      const covered = !!c.covered_by;
+      const shared = c.shared_with && c.shared_with.length;
+      const notes = [];
+
+      if (covered) {
+        notes.push("Already included in <strong>" + esc(c.covered_by_label) + "</strong> below.");
+      } else if (shared) {
+        const others = c.shared_with.map((l) => LOCATION_LABELS[l] || l).join(", ");
+        notes.push("Same physical job as <strong>" + esc(others) + "</strong> — counted once.");
+      }
+      // Explanatory text comes from cost_reference.json, not from hardcoded strings here --
+      // otherwise editing the reference file would not change what anyone actually reads.
+      if (c.important) notes.push(esc(c.important));
+      if (c.confidence === "low" && c.confidence_note) {
+        notes.push("<strong>Estimate only</strong> — " + esc(c.confidence_note));
+      }
+      if (c.economic_alternative_cost_eur) {
+        notes.push("Alternative: " + esc(c.economic_alternative_label) + " " +
+          euro(c.economic_alternative_cost_eur) + "." +
+          (c.economic_note ? " " + esc(c.economic_note) : ""));
+      }
+
+      return '<div class="cost' + (covered ? " is-covered" : "") + '">' +
+        '<div class="cost-line">' +
+        '<span class="cost-action">' + esc(c.job_statement || c.job_label) + '</span>' +
+        '<span class="cost-figure">' + euro(c.cost_eur) + '</span>' +
+        '</div>' +
+        (notes.length ? '<div class="cost-note">' + notes.join(" ") + '</div>' : "") +
+        '</div>';
+    }
+
+    function totalsBlock(costs) {
+      if (!costs || !costs.summary) return "";
+      const s = costs.summary;
+      let html = '<div class="totals">';
+
+      // sub is optional; a row without it keeps label and figure on one line.
+      const totalRow = (label, sub, band) =>
+        '<div class="total-row">' +
+        '<span class="total-label">' + esc(label) +
+        (sub ? '<span class="total-sub">' + esc(sub) + '</span>' : "") +
+        '</span>' +
+        '<span class="total-figure">' + euro(band) + '</span>' +
+        '</div>';
+
+      if (s.motor_repair) {
+        html += totalRow("Estimated motor repair", null, s.motor_repair.cost_eur);
+      }
+      if (s.other_work) {
+        html += totalRow("Electrical supply work", "Separate trade and budget line",
+          s.other_work.cost_eur);
+      }
+
+      return html + '</div>';
+    }
+
     function render(r) {
       if (r.verdict === "rejected" || r.verdict === "cannot_process" || r.verdict === "error") {
         viewerSection.hidden = true;
@@ -229,16 +308,16 @@
           ? "Anomaly detection independently agrees this recording is abnormal."
           : "Note: overall anomaly detection did not flag this recording — the finding below comes from per-location analysis alone.";
       } else if (r.verdict === "anomaly_detected_unattributed") {
-        title = "Anomaly detected — cause not identified";
+        title = "Anomaly detected. Cause could not be identified";
         note = "The recording is abnormal, but it does not match any fault signature the system can localise.";
       } else {
         title = "No issue detected";
-        note = "Neither overall anomaly detection nor per-location analysis flagged this recording.";
+        note = "No anomaly has been detected. Recording is normal.";
       }
 
       const c = r.condition_detected || {};
       const meta = [
-        ["Regime", r.regime === "torque_circulation" ? "Constant speed" : "Constant torque"],
+        ["Regime", r.regime === "torque_circulation" ? "Constant Speed" : "Constant Torque"],
         ["Load", c.torque_nm != null ? c.torque_nm + " Nm" : "—"],
         ["Speed", c.rpm != null ? c.rpm + " rpm" : "—"],
         ["Duration", r.duration_sec != null ? r.duration_sec + " s" : "—"],
@@ -247,6 +326,10 @@
       ].map(([k, v]) =>
         '<div class="meta-cell"><div class="meta-key">' + k + '</div>' +
         '<div class="meta-val">' + esc(v) + '</div></div>').join("");
+
+      // Cost annotations arrive keyed alongside the issues, in the same order.
+      const costByLocation = {};
+      ((r.costs && r.costs.per_issue) || []).forEach((c) => { costByLocation[c.location] = c; });
 
       const rows = issues.map((i) => {
         const label = LOCATION_LABELS[i.location] || i.location;
@@ -266,6 +349,7 @@
           '</div>' +
           '<div class="meter"><div class="meter-fill" style="width:' + pct + '%"></div></div>' +
           (i.caveat ? '<div class="caveat">' + esc(i.caveat) + '</div>' : "") +
+          costBlock(costByLocation[i.location]) +
           '</div>';
       }).join("");
 
@@ -276,6 +360,7 @@
         '</div>' +
         '<div class="meta">' + meta + '</div>' +
         (rows ? '<div class="issues">' + rows + '</div>' : "") +
+        totalsBlock(r.costs) +
         '<div class="footnote">Severity is only assessed for bearing faults; other locations are reported as presence only.</div>';
 
       // Shown for every completed analysis, healthy or not.

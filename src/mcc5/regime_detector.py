@@ -26,7 +26,6 @@ Two known files (bearing_inner_L and bearing_outer_H, both torque_circulation, b
 speed_circulation's range) -- flagged honestly, not hidden; these two are individual
 recording anomalies, not a systematic condition-level effect like the RPM drift above.
 """
-import numpy as np
 
 # Calibrated from the two known healthy files' own torque CV, not tuned on fault data.
 # Only used for the informational "distance" fields below -- NOT the actual regime

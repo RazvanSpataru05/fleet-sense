@@ -24,7 +24,7 @@ import numpy as np
 from scipy.signal import hilbert
 from scipy.stats import kurtosis
 
-from load_mcc5 import FS, list_files, load_recording, parse_filename
+from load_mcc5 import FS, load_recording, parse_filename
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -115,7 +115,6 @@ BLIND_SEARCH_BAND = (10.0, 60.0)  # wide enough to contain all 3 known RPMs' nom
 # frequencies (16.7, 33.3, 50.0 Hz) with margin, so the fundamental can be found without
 # knowing the RPM first -- unlike fundamental_search_band, which needs it already known.
 KNOWN_NOMINAL_RPMS = (1000, 2000, 3000)
-KNOWN_TORQUE_LEVELS_NM = (20, 40)
 
 # The "torque" column is NOT recorded in Nm -- it's some other, unlabeled unit (a per-unit
 # fraction of rated torque, most likely). Checked directly against every file's true label:
@@ -371,12 +370,5 @@ def windows_for_file_blind(csv_path: Path, df=None) -> list:
         df = load_recording(csv_path)
     condition = detect_condition_from_data(df)
     return windows_for_file(csv_path, torque_nm=condition["torque_nm"], rpm=condition["rpm"], df=df)
-
-
-def build_matrix(files) -> np.ndarray:
-    rows = []
-    for f in files:
-        rows.extend(windows_for_file(f))
-    return np.array(rows)
 
 

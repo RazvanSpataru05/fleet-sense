@@ -33,7 +33,7 @@ import joblib
 from collections import Counter
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report
 
 from load_mcc5 import list_files, list_fault_types
 from envelope_dataset_mcc5 import windows_for_file, artifacts_dir
@@ -46,11 +46,6 @@ def cache_file(split: str):
     cache_dir = artifacts_dir(split) / "classifier_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir / "multi_condition_dataset.npz"
-
-
-# kept for backwards compatibility with existing callers that import these directly
-CACHE_DIR = artifacts_dir(SPLIT) / "classifier_cache"
-CACHE_FILE = cache_file(SPLIT)
 
 
 def build_dataset(split=SPLIT, force=False):

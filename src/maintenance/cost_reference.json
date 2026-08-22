@@ -21,9 +21,10 @@
     "Costs are BANDS, never point values. Two reasons: real quotes vary by shop, and",
     "FleetSense's own presence_confidence values are RandomForest vote fractions, not",
     "calibrated probabilities -- so a single precise euro figure would imply a certainty",
-    "the model does not have."
+    "the model does not have.",
+    "",
+    "Each job carries both a `label` (short noun phrase, used when one job is referenced from another, e.g. 'Already included in Bearing renewal and realignment') and a `statement` (formal sentence, used as the headline on a flagged issue). Keeping both avoids sentences reading badly when nested inside other sentences."
   ],
-
   "meta": {
     "currency": "EUR",
     "compiled": "2026-08-22",
@@ -38,7 +39,6 @@
       "The published rewind service is quoted for motors up to 2 kW. This motor is 2.2 kW, marginally above that bracket."
     ]
   },
-
   "labour_rates_eur_per_hour": {
     "motor_workshop": {
       "min": 16,
@@ -53,46 +53,68 @@
       "confidence": "medium_high"
     }
   },
-
   "repair_jobs": {
     "bearing_replacement": {
       "label": "Replace both bearings",
+      "statement": "Both bearings require replacement",
       "action": "repair",
       "category": "motor_mechanical",
-      "cost_eur": { "min": 24, "max": 68 },
+      "cost_eur": {
+        "min": 24,
+        "max": 68
+      },
       "breakdown": {
         "parts_eur": 8,
         "parts_detail": "2 x SKF 6205-2Z/C3 at EUR 4 each (19.95 RON). Bearings are replaced in pairs: the second bearing has seen identical service hours and replacing one alone invites a repeat teardown.",
-        "labour_hours": { "min": 1, "max": 2 },
+        "labour_hours": {
+          "min": 1,
+          "max": 2
+        },
         "labour_rate": "motor_workshop"
       },
       "confidence": "high",
-      "sources": ["rulmentika_6205", "electrician_rates_bucuresti", "daibau_electrician"]
+      "sources": [
+        "rulmentika_6205",
+        "electrician_rates_bucuresti",
+        "daibau_electrician"
+      ]
     },
-
     "stator_rewind": {
       "label": "Rewind stator",
+      "statement": "The stator winding requires rewinding",
       "action": "repair",
       "category": "motor_electrical",
-      "cost_eur": { "min": 104, "max": 120 },
+      "cost_eur": {
+        "min": 104,
+        "max": 120
+      },
       "breakdown": {
         "parts_eur": null,
         "parts_detail": "All-in shop price. The published service covers rewinding to manufacturer spec, bearing replacement and varnishing, with a 6-month warranty -- so it already absorbs bearing_replacement.",
         "labour_hours": null,
         "labour_rate": null
       },
-      "absorbs": ["bearing_replacement"],
+      "absorbs": [
+        "bearing_replacement"
+      ],
       "economic_alternative": "motor_replacement",
       "economic_note": "Borderline for this motor. Against a budget 2-pole replacement (EUR 145) a rewind is ~72% of new-motor cost, which exceeds the ~57% industry rule of thumb and argues for replacement. Against a better-specified motor (EUR 405) the same rewind is ~26% and clearly worth doing. The verdict genuinely depends on which motor you would buy to replace it.",
       "confidence": "high",
-      "sources": ["profiairvent_rewind", "industrialmonitor_repair_replace", "universalrewind_repair_replace"]
+      "sources": [
+        "profiairvent_rewind",
+        "industrialmonitor_repair_replace",
+        "universalrewind_repair_replace"
+      ]
     },
-
     "motor_replacement": {
       "label": "Replace motor",
+      "statement": "The motor requires replacement",
       "action": "replace",
       "category": "motor_electrical",
-      "cost_eur": { "min": 145, "max": 405 },
+      "cost_eur": {
+        "min": 145,
+        "max": 405
+      },
       "breakdown": {
         "parts_eur": null,
         "parts_detail": "EUR 145 = budget 2-pole 2.2 kW (723 RON, Gamak AGM2E 90 L 2, 2880 rpm, IP55, 83% efficiency). EUR 405 = higher-specified 4-pole unit (2023.92 RON). The motor under analysis is 2-pole, so the lower end is the honest comparator. Excludes removal/refitting labour.",
@@ -100,60 +122,90 @@
         "labour_rate": null
       },
       "confidence": "high",
-      "sources": ["dedeman_motor", "ventsys_motor"]
+      "sources": [
+        "dedeman_motor",
+        "ventsys_motor"
+      ]
     },
-
     "shaft_repair": {
       "label": "Straighten or re-machine shaft",
+      "statement": "The shaft requires straightening or re-machining",
       "action": "repair",
       "category": "motor_mechanical",
-      "cost_eur": { "min": 32, "max": 120 },
+      "cost_eur": {
+        "min": 32,
+        "max": 120
+      },
       "breakdown": {
         "parts_eur": null,
         "parts_detail": "Machine-shop work. A replacement shaft, where straightening is not viable, pushes this toward the motor_replacement band and the two should be compared.",
-        "labour_hours": { "min": 2, "max": 4 },
+        "labour_hours": {
+          "min": 2,
+          "max": 4
+        },
         "labour_rate": "motor_workshop"
       },
       "economic_alternative": "motor_replacement",
       "confidence": "low",
       "confidence_note": "No published Romanian price found for shaft straightening. Derived from workshop labour hours alone -- treat as an order-of-magnitude estimate, not a quote.",
-      "sources": ["repairengineering_shaft"]
+      "sources": [
+        "repairengineering_shaft"
+      ]
     },
-
     "airgap_correction": {
       "label": "Bearing renewal and realignment",
+      "statement": "The bearings require renewal and the end shields realignment",
       "action": "repair",
       "category": "motor_mechanical",
-      "cost_eur": { "min": 40, "max": 100 },
+      "cost_eur": {
+        "min": 40,
+        "max": 100
+      },
       "breakdown": {
         "parts_eur": 8,
         "parts_detail": "Eccentricity is a condition of the rotor-stator air gap rather than a failed component. It is corrected by renewing worn bearings and re-seating/realigning the end shields; severe cases with core rub are motor_replacement instead.",
-        "labour_hours": { "min": 2, "max": 3 },
+        "labour_hours": {
+          "min": 2,
+          "max": 3
+        },
         "labour_rate": "motor_workshop"
       },
-      "absorbs": ["bearing_replacement"],
+      "absorbs": [
+        "bearing_replacement"
+      ],
       "confidence": "medium",
       "confidence_note": "Derived from parts plus workshop labour; no single published line item covers this job.",
-      "sources": ["rulmentika_6205", "electrician_rates_bucuresti"]
+      "sources": [
+        "rulmentika_6205",
+        "electrician_rates_bucuresti"
+      ]
     },
-
     "supply_investigation": {
       "label": "Investigate and correct supply imbalance",
+      "statement": "The supply imbalance requires investigation and correction",
       "action": "repair",
       "category": "electrical_supply",
-      "cost_eur": { "min": 30, "max": 80 },
+      "cost_eur": {
+        "min": 30,
+        "max": 80
+      },
       "breakdown": {
         "parts_eur": null,
         "parts_detail": "No motor parts. This is switchgear/cabling/transformer-side work.",
-        "labour_hours": { "min": 1, "max": 2 },
+        "labour_hours": {
+          "min": 1,
+          "max": 2
+        },
         "labour_rate": "authorised_electrician"
       },
       "confidence": "medium_high",
       "important": "This is NOT a motor repair. Voltage unbalance originates upstream of the motor; dispatching a motor workshop would fix nothing while the real fault keeps damaging the machine. It belongs to a different trade and a different budget line, and should be reported separately from motor repair cost.",
-      "sources": ["electrician_rates_bucuresti", "daibau_electrician"]
+      "sources": [
+        "electrician_rates_bucuresti",
+        "daibau_electrician"
+      ]
     }
   },
-
   "locations": {
     "bearing_outer": {
       "label": "Bearing - outer race",
@@ -195,7 +247,6 @@
       "job": "supply_investigation"
     }
   },
-
   "sources": {
     "profiairvent_rewind": {
       "what": "Rewind of an electric motor up to 2 kW: 520 RON incl. VAT (430 excl.). Covers rewinding to manufacturer spec, bearing replacement, varnishing. 6-month warranty.",

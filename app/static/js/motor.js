@@ -86,7 +86,6 @@ let renderer, scene, camera, controls, raycaster, container, tooltipEl, detailEl
 let parts = {};          // id -> { group, fills[], edges[], status, issue }
 let pickables = [];      // meshes eligible for raycasting
 let hoveredId = null, pinnedId = null;
-let frameHandle = null;
 const pointer = new THREE.Vector2();
 let pointerInside = false;
 
@@ -435,7 +434,7 @@ function resize() {
 }
 
 function loop() {
-  frameHandle = requestAnimationFrame(loop);
+  requestAnimationFrame(loop);
   controls.update();
   renderer.render(scene, camera);
 }

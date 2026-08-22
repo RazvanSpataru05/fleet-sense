@@ -117,7 +117,8 @@ def estimate(issues: list, reference: dict = None) -> dict:
             "location": loc,
             "costed": True,
             "job": job_id,
-            "job_label": job["label"],
+            "job_label": job["label"],          # short form, for cross-references
+            "job_statement": job["statement"],  # formal sentence, for the headline
             "action": job["action"],
             "category": job["category"],
             "cost_eur": job["cost_eur"],

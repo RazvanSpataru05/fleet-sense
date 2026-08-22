@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Register — FleetSense</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("fleetsense-theme");
+        if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+      } catch (e) { }
+    })();
+  </script>
+</head>
+
+<body>
+
+  <header class="masthead">
+    <div class="masthead-inner">
+      <div class="wordmark">Fleet<span>Sense</span></div>
+      <div class="masthead-sub">Motor current signature analysis</div>
+    </div>
+  </header>
+
+  <main class="auth-shell">
+    <section class="panel">
+      <div class="panel-head">Register a site</div>
+      <div class="panel-body">
+
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        {% for m in messages %}<div class="form-error">{{ m }}</div>{% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <form method="post">
+          <div class="field">
+            <label class="field-label" for="factory_name">Site or plant name</label>
+            <input type="text" id="factory_name" name="factory_name" maxlength="120" required>
+            <p class="field-hint">Shown on your fleet overview, e.g. "Braşov — Assembly Hall 2".</p>
+          </div>
+          <div class="field">
+            <label class="field-label" for="email">Email</label>
+            <input type="email" id="email" name="email" autocomplete="email" required>
+          </div>
+          <div class="field">
+            <label class="field-label" for="password">Password</label>
+            <input type="password" id="password" name="password" autocomplete="new-password"
+                   minlength="8" required>
+            <p class="field-hint">At least 8 characters.</p>
+          </div>
+          <div class="field">
+            <button class="btn" type="submit">Create account</button>
+          </div>
+        </form>
+
+        <p class="auth-alt">Already registered? <a href="{{ url_for('login') }}">Sign in</a></p>
+      </div>
+    </section>
+  </main>
+
+</body>
+
+</html>
