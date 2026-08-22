@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fleetsense-webapp",
+      "runtimeExecutable": "E:\\Summer School\\Proiect Final\\FleetSense\\.venv\\Scripts\\python.exe",
+      "runtimeArgs": ["app/app.py"],
+      "port": 5000
+    }
+  ]
+}
