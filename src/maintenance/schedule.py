@@ -142,9 +142,19 @@ def build_plan(entries: list, budget_eur: float) -> dict:
     order if it fits, and skipped (not stopped at) if it does not, so cheaper lower-priority
     work still fills the remaining budget.
 
-    Supply-side electrical work is reported but NOT charged against this budget: it is a
-    different trade and a different budget line, consistent with how it is handled
-    throughout the cost model."""
+    Supply-side electrical work IS charged against this budget -- a manager entering a
+    figure means money, not "motor work only, plus an unbounded amount of electrical".
+    It stays labelled as a different trade, but the money is one pot. Motor work is
+    charged FIRST and supply work takes what remains: motor condition is the domain this
+    tool actually measures, so it has first call on the budget.
+
+    That work is charged ONCE for the whole plan, not per machine. Voltage unbalance is a
+    supply-side fault: if the feed is unbalanced every motor on it sees the same fault, and
+    one electrician visit fixes the root cause for all of them -- the same reasoning that
+    collapses three bearing detections into one bearing job. The caveat is that FleetSense
+    has no plant topology, so it cannot know whether two flagged machines actually share a
+    feed. The affected machines are listed so a manager who knows they are on separate
+    transformers can budget one investigation per feed."""
     ranked = []
     for e in entries:
         scored = score_analysis(e["result"])
@@ -158,13 +168,25 @@ def build_plan(entries: list, budget_eur: float) -> dict:
     for i, r in enumerate(ranked, start=1):
         r["rank"] = i
 
-    scheduled, deferred, no_action = [], [], []
     remaining = float(budget_eur)
+    scheduled, deferred, no_action, awaiting_supply = [], [], [], []
 
+    # --- motor work first: this is the domain the tool operates in, so it has first call
+    # on the budget. Supply-side work is charged from whatever is left. ---
     for r in ranked:
         if r["score"] == 0:
             no_action.append(r)
             continue
+
+        # A machine whose only remedy is the shared supply job has no motor cost of its
+        # own, so a plain "does it fit" test would always pass and list it as scheduled
+        # even if the electrical work turns out to be unaffordable. Held back until that
+        # job's fate is known.
+        if not r.get("cost_eur") and r.get("other_eur"):
+            r["remedy"] = "electrical"
+            awaiting_supply.append(r)
+            continue
+
         worst = (r["cost_eur"] or {}).get("max", 0)
         if worst <= remaining:
             remaining -= worst
@@ -174,6 +196,31 @@ def build_plan(entries: list, budget_eur: float) -> dict:
             # rather than silently dropping machines that still need attention.
             r["shortfall_eur"] = round(worst - remaining, 2)
             deferred.append(r)
+
+    # --- then supply-side work, from the remainder ---
+    affected = [r for r in ranked if r.get("other_eur")]
+    electrical = None
+    if affected:
+        band = {"min": max(r["other_eur"]["min"] for r in affected),
+                "max": max(r["other_eur"]["max"] for r in affected)}
+        electrical = {"cost_eur": band,
+                      "machines": [r["label"] for r in affected],
+                      "scheduled": band["max"] <= remaining}
+        if electrical["scheduled"]:
+            remaining -= band["max"]
+        else:
+            electrical["shortfall_eur"] = round(band["max"] - remaining, 2)
+
+    for r in awaiting_supply:
+        if electrical["scheduled"]:
+            scheduled.append(r)
+        else:
+            r["shortfall_eur"] = electrical["shortfall_eur"]
+            deferred.append(r)
+
+    # Held-back machines were appended after the loop, so restore priority order.
+    scheduled.sort(key=lambda r: r["rank"])
+    deferred.sort(key=lambda r: r["rank"])
 
     def total(rows, key):
         lo = sum(x[key]["min"] for x in rows if x.get(key))
@@ -189,16 +236,21 @@ def build_plan(entries: list, budget_eur: float) -> dict:
         if seen[key] == 2:
             duplicates.append(r["label"])
 
+    committed = total(scheduled, "cost_eur") or {"min": 0, "max": 0}
+    if electrical and electrical["scheduled"]:
+        committed = {"min": committed["min"] + electrical["cost_eur"]["min"],
+                     "max": committed["max"] + electrical["cost_eur"]["max"]}
+
     return {
         "entries": ranked,
         "scheduled": scheduled,
         "deferred": deferred,
         "no_action": no_action,
+        "electrical": electrical,
         "needing_action": len(scheduled) + len(deferred),
         "budget_eur": round(float(budget_eur), 2),
-        "committed": total(scheduled, "cost_eur"),
+        "committed": committed,
         "remaining_eur": round(remaining, 2),
         "deferred_total": total(deferred, "cost_eur"),
-        "other_work_total": total(scheduled + deferred, "other_eur"),
         "duplicate_labels": duplicates,
     }

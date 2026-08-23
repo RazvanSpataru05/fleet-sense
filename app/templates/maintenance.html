@@ -96,15 +96,21 @@
         <ul class="plan-reasons">
           {% for r in e.reasons %}<li>{{ r }}</li>{% endfor %}
           {% if deferred %}
-          <li class="reason-blocking">Exceeds the remaining budget by
-            €{{ e.shortfall_eur | round | int }}.</li>
+          <li class="reason-blocking">
+            {% if e.remedy == 'electrical' %}
+            Waiting on the shared supply investigation, which exceeds the budget by
+            €{{ e.shortfall_eur | round | int }}.
+            {% else %}
+            Exceeds the remaining budget by €{{ e.shortfall_eur | round | int }}.
+            {% endif %}
+          </li>
           {% endif %}
         </ul>
       </div>
       <div class="plan-cost">
         {% if e.cost_eur %}€{{ e.cost_eur.min }}–{{ e.cost_eur.max }}{% else %}—{% endif %}
         {% if e.other_eur %}
-        <div class="plan-cost-other">+ €{{ e.other_eur.min }}–{{ e.other_eur.max }} electrical</div>
+        <div class="plan-cost-other">supply work — shared, below</div>
         {% endif %}
       </div>
     </div>
@@ -129,6 +135,39 @@
     </div>
     {% endif %}
 
+    {% if plan.electrical %}
+    <div class="plan-group-head">Plant-level — supply side</div>
+    <div class="plan-list">
+      <div class="plan-row {{ 'is-deferred' if not plan.electrical.scheduled }}">
+        <div class="plan-rank">⚡</div>
+        <div class="plan-body">
+          <div class="plan-top"><span class="plan-name">Investigate and correct supply imbalance</span></div>
+          <div class="plan-action">Authorised electrician — switchgear, cabling and phase balance.</div>
+          <ul class="plan-reasons">
+            <li>Detected on:
+              <strong>{{ plan.electrical.machines|join(', ') }}</strong>.</li>
+            <li>Charged after motor work, from the remaining budget.</li>
+            <li>Counted once, not per machine — an unbalanced feed affects every motor on
+              it, so one visit corrects the root cause.
+              {% if plan.electrical.machines|length > 1 %}
+              If these machines are on separate feeds, budget one investigation per feed.
+              {% endif %}
+            </li>
+            <li>Not a motor repair — sending a motor workshop would find healthy motors
+              while the real fault continues.</li>
+            {% if not plan.electrical.scheduled %}
+            <li class="reason-blocking">Exceeds the budget by
+              €{{ plan.electrical.shortfall_eur | round | int }}.</li>
+            {% endif %}
+          </ul>
+        </div>
+        <div class="plan-cost">
+          €{{ plan.electrical.cost_eur.min }}–{{ plan.electrical.cost_eur.max }}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
     {% if plan.no_action %}
     <div class="plan-group-head">No action required</div>
     <div class="plan-list">
@@ -139,12 +178,11 @@
     <div class="totals">
       <div class="total-row">
         <span class="total-label">Committed this cycle
-          <span class="total-sub">{{ plan.scheduled|length }} job{{ '' if plan.scheduled|length == 1 else 's' }},
-            worst case</span>
+          <span class="total-sub">
+            {{ plan.scheduled|length }} motor job{{ '' if plan.scheduled|length == 1 else 's' }}{% if
+            plan.electrical and plan.electrical.scheduled %} plus supply work{% endif %}, worst case</span>
         </span>
-        <span class="total-figure">
-          €{{ plan.committed.max if plan.committed else 0 }}
-        </span>
+        <span class="total-figure">€{{ plan.committed.max if plan.committed else 0 }}</span>
       </div>
       <div class="total-row">
         <span class="total-label">Budget remaining
@@ -159,14 +197,6 @@
             still needing attention</span>
         </span>
         <span class="total-figure">€{{ plan.deferred_total.min }}–{{ plan.deferred_total.max }}</span>
-      </div>
-      {% endif %}
-      {% if plan.other_work_total %}
-      <div class="total-row">
-        <span class="total-label">Electrical supply work
-          <span class="total-sub">Separate trade — not charged against this budget</span>
-        </span>
-        <span class="total-figure">€{{ plan.other_work_total.min }}–{{ plan.other_work_total.max }}</span>
       </div>
       {% endif %}
     </div>

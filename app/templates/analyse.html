@@ -252,7 +252,7 @@
       title = issues.length === 1 ? "1 issue detected" : issues.length + " issues detected";
       note = r.layer1_anomalous
         ? "Anomaly detection independently agrees this recording is abnormal."
-        : "Note: overall anomaly detection did not flag this recording — the finding below comes from per-location analysis alone.";
+        : "Note: overall anomaly detection did not flag this recording. The finding below comes from per-location analysis alone.";
     } else if (r.verdict === "anomaly_detected_unattributed") {
       title = "Anomaly detected. Cause could not be identified";
       note = "The recording is abnormal, but it does not match any fault signature the system can localise.";
