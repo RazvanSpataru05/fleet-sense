@@ -61,9 +61,9 @@ const PART_LABEL = {
   rotor_bars: "Rotor bars",
   air_gap: "Air gap",
   shaft: "Shaft",
-  bearing_outer: "Bearing — outer race",
-  bearing_ball: "Bearing — rolling elements",
-  bearing_inner: "Bearing — inner race",
+  bearing_outer: "Bearing outer race",
+  bearing_ball: "Bearing rolling elements",
+  bearing_inner: "Bearing inner race",
 };
 
 const BEARING_PARTS = new Set(["bearing_outer", "bearing_ball", "bearing_inner"]);
@@ -474,14 +474,16 @@ function resetView() {
 
 /** Debug aid: the actual painted state of every part, straight off the materials. */
 function inspect() {
-  const out = { _camera: {
-    x: +camera.position.x.toFixed(3),
-    y: +camera.position.y.toFixed(3),
-    z: +camera.position.z.toFixed(3),
-    azimuthDeg: +THREE.MathUtils.radToDeg(controls.getAzimuthalAngle()).toFixed(2),
-    polarDeg: +THREE.MathUtils.radToDeg(controls.getPolarAngle()).toFixed(2),
-    distance: +controls.getDistance().toFixed(3),
-  } };
+  const out = {
+    _camera: {
+      x: +camera.position.x.toFixed(3),
+      y: +camera.position.y.toFixed(3),
+      z: +camera.position.z.toFixed(3),
+      azimuthDeg: +THREE.MathUtils.radToDeg(controls.getAzimuthalAngle()).toFixed(2),
+      polarDeg: +THREE.MathUtils.radToDeg(controls.getPolarAngle()).toFixed(2),
+      distance: +controls.getDistance().toFixed(3),
+    }
+  };
   for (const [id, p] of Object.entries(parts)) {
     out[id] = {
       status: p.status,

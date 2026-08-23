@@ -93,10 +93,17 @@ class Analysis(db.Model):
 
     @property
     def worst_severity(self) -> str:
-        """high > low > unknown > none -- used for fleet ordering and colour."""
+        """high > low > unknown > none -- used for fleet ordering and colour.
+
+        'none' means genuinely nothing found. A recording where Layer 1 flagged an
+        anomaly that Layer 2 could not localise is NOT healthy, so it grades as
+        'unknown' -- showing it green would tell a plant manager the machine is fine
+        when the system is actually saying it looks abnormal but cannot say where."""
         sevs = {i.get("severity") for i in self.issues}
         if "high" in sevs:
             return "high"
         if "low" in sevs:
             return "low"
-        return "unknown" if self.issues else "none"
+        if self.issues or self.verdict == "anomaly_detected_unattributed":
+            return "unknown"
+        return "none"

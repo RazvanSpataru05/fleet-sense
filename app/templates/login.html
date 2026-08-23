@@ -1,31 +1,8 @@
-<!doctype html>
-<html lang="en">
+{% extends "base.html" %}
+{% block title %}Sign in — FleetSense{% endblock %}
 
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sign in — FleetSense</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-  <script>
-    (function () {
-      try {
-        var t = localStorage.getItem("fleetsense-theme");
-        if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
-      } catch (e) { }
-    })();
-  </script>
-</head>
-
-<body>
-
-  <header class="masthead">
-    <div class="masthead-inner">
-      <div class="wordmark">Fleet<span>Sense</span></div>
-      <div class="masthead-sub">Motor current signature analysis</div>
-    </div>
-  </header>
-
-  <main class="auth-shell">
+{% block content %}
+<main class="auth-shell">
     <section class="panel">
       <div class="panel-head">Sign in</div>
       <div class="panel-body">
@@ -54,7 +31,4 @@
       </div>
     </section>
   </main>
-
-</body>
-
-</html>
+{% endblock %}

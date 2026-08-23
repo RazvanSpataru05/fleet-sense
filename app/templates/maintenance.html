@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% set active_page = "maintenance" %}
+{% block title %}Maintenance — FleetSense{% endblock %}
+
+{% block content %}
+<main class="fleet-shell">
+
+  {% if not analyses %}
+  <section class="panel">
+    <div class="panel-head">Maintenance plan</div>
+    <div class="placeholder">
+      Nothing to plan yet. <a href="{{ url_for('analyse_page') }}">Analyse a recording</a> first.
+    </div>
+  </section>
+
+  {% else %}
+  <form method="post">
+    <section class="panel">
+      <div class="panel-head">
+        <div class="panel-head-row">
+          <span>Include in the plan</span>
+          <span class="select-actions">
+            <button class="ghost-btn" type="button" id="select-all">All</button>
+            <button class="ghost-btn" type="button" id="select-none">None</button>
+          </span>
+        </div>
+      </div>
+
+      <div class="select-list">
+        {% for a in analyses %}
+        <label class="select-row">
+          <input type="checkbox" name="include" value="{{ a.id }}" {{ 'checked' if not plan or a.id in
+            plan.entries|map(attribute='id' )|list }}>
+          <span class="select-main">
+            <span class="select-name">{{ a.motor_label }}</span>
+            <span class="select-meta">
+              {{ a.created_at.strftime('%d %b %H:%M') }} · {{ a.torque_nm }} Nm · {{ a.rpm }} rpm
+            </span>
+          </span>
+          <span class="select-findings">
+            {% if a.issues %}
+            {% for i in a.issues %}
+            <span
+              class="chip chip-{{ 'high' if i.severity == 'high' else ('low' if i.severity == 'low' else 'unknown') }}">
+              {{ location_label(i.location) }}
+            </span>
+            {% endfor %}
+            {% elif a.verdict == 'anomaly_detected_unattributed' %}
+            <span class="chip chip-unknown">Abnormal — cause not identified</span>
+            {% else %}
+            <span class="chip chip-ok">No issue detected</span>
+            {% endif %}
+          </span>
+        </label>
+        {% endfor %}
+      </div>
+
+      <div class="panel-foot budget-foot">
+        <div class="budget-field">
+          <label class="field-label" for="budget">Available budget (EUR)</label>
+          <input type="number" id="budget" name="budget" min="1" step="1" required value="{{ budget_value }}"
+            placeholder="e.g. 500">
+          {% if budget_error %}<div class="form-error">{{ budget_error }}</div>{% endif %}
+        </div>
+        <button class="btn btn-inline" type="submit">Generate Maintenance Plan</button>
+      </div>
+    </section>
+  </form>
+
+  {% if plan %}
+  <section class="panel plan-panel">
+    <div class="panel-head">
+      <div class="panel-head-row">
+        <span>Maintenance Plan</span>
+      </div>
+    </div>
+
+    {% if plan.duplicate_labels %}
+    <div class="notice">
+      More than one recording selected for:
+      <strong>{{ plan.duplicate_labels|join(', ') }}</strong>.
+      Each is planned as separate work — if they are the same machine, deselect the older one.
+    </div>
+    {% endif %}
+
+    {% if not plan.entries %}
+    <div class="placeholder">Nothing selected.</div>
+    {% else %}
+
+    {% macro plan_row(e, deferred=false) %}
+    <div class="plan-row {{ 'is-idle' if e.score == 0 }} {{ 'is-deferred' if deferred }}">
+      <div class="plan-rank">{{ e.rank }}</div>
+      <div class="plan-body">
+        <div class="plan-top"><span class="plan-name">{{ e.label }}</span></div>
+        <div class="plan-action">{{ e.action }}</div>
+        <ul class="plan-reasons">
+          {% for r in e.reasons %}<li>{{ r }}</li>{% endfor %}
+          {% if deferred %}
+          <li class="reason-blocking">Exceeds the remaining budget by
+            €{{ e.shortfall_eur | round | int }}.</li>
+          {% endif %}
+        </ul>
+      </div>
+      <div class="plan-cost">
+        {% if e.cost_eur %}€{{ e.cost_eur.min }}–{{ e.cost_eur.max }}{% else %}—{% endif %}
+        {% if e.other_eur %}
+        <div class="plan-cost-other">+ €{{ e.other_eur.min }}–{{ e.other_eur.max }} electrical</div>
+        {% endif %}
+      </div>
+    </div>
+    {% endmacro %}
+
+    {% if plan.scheduled %}
+    <div class="plan-group-head">Scheduled</div>
+    <div class="plan-list">
+      {% for e in plan.scheduled %}{{ plan_row(e) }}{% endfor %}
+    </div>
+    {% else %}
+    <div class="placeholder">
+      Nothing fits a €{{ plan.budget_eur | round | int }} budget. The cheapest outstanding
+      job is €{{ plan.deferred[0].cost_eur.max if plan.deferred and plan.deferred[0].cost_eur }}.
+    </div>
+    {% endif %}
+
+    {% if plan.deferred %}
+    <div class="plan-group-head is-deferred-head">Deferred — no budget remaining</div>
+    <div class="plan-list">
+      {% for e in plan.deferred %}{{ plan_row(e, deferred=true) }}{% endfor %}
+    </div>
+    {% endif %}
+
+    {% if plan.no_action %}
+    <div class="plan-group-head">No action required</div>
+    <div class="plan-list">
+      {% for e in plan.no_action %}{{ plan_row(e) }}{% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="totals">
+      <div class="total-row">
+        <span class="total-label">Committed this cycle
+          <span class="total-sub">{{ plan.scheduled|length }} job{{ '' if plan.scheduled|length == 1 else 's' }},
+            worst case</span>
+        </span>
+        <span class="total-figure">
+          €{{ plan.committed.max if plan.committed else 0 }}
+        </span>
+      </div>
+      <div class="total-row">
+        <span class="total-label">Budget remaining
+          <span class="total-sub">if every job quotes at its maximum</span>
+        </span>
+        <span class="total-figure">€{{ plan.remaining_eur | round | int }}</span>
+      </div>
+      {% if plan.deferred_total %}
+      <div class="total-row">
+        <span class="total-label">Deferred work
+          <span class="total-sub">{{ plan.deferred|length }} machine{{ '' if plan.deferred|length == 1 else 's' }}
+            still needing attention</span>
+        </span>
+        <span class="total-figure">€{{ plan.deferred_total.min }}–{{ plan.deferred_total.max }}</span>
+      </div>
+      {% endif %}
+      {% if plan.other_work_total %}
+      <div class="total-row">
+        <span class="total-label">Electrical supply work
+          <span class="total-sub">Separate trade — not charged against this budget</span>
+        </span>
+        <span class="total-figure">€{{ plan.other_work_total.min }}–{{ plan.other_work_total.max }}</span>
+      </div>
+      {% endif %}
+    </div>
+
+    {% endif %}
+  </section>
+  {% endif %}
+  {% endif %}
+
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    const all = document.getElementById("select-all");
+    if (!all) return;
+    const boxes = () => document.querySelectorAll('.select-list input[type="checkbox"]');
+    all.addEventListener("click", () => boxes().forEach(b => b.checked = true));
+    document.getElementById("select-none")
+      .addEventListener("click", () => boxes().forEach(b => b.checked = false));
+  })();
+</script>
+{% endblock %}

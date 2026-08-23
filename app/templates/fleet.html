@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% set active_page = "fleet" %}
+{% block title %}Fleet — FleetSense{% endblock %}
+
+{% block content %}
+<main class="fleet-shell">
+
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-head-row">
+        <span>{{ current_user.factory_name }}</span>
+      </div>
+    </div>
+
+    {% if not analyses %}
+    <div class="placeholder">
+      No recordings analysed yet.
+      <a href="{{ url_for('analyse_page') }}">Upload your first one</a>.
+    </div>
+    {% else %}
+
+    <div class="fleet-list">
+      {% for a in analyses %}
+      <div class="fleet-row tone-{{ a.worst_severity }}">
+        <div class="fleet-main">
+          <div class="fleet-name">{{ a.motor_label }}</div>
+          <div class="fleet-meta">
+            {{ a.regime and (a.regime == 'torque_circulation' and 'Constant speed' or 'Constant torque') or '—' }}
+            · {{ a.torque_nm }} Nm · {{ a.rpm }} rpm
+            · {{ a.created_at.strftime('%d %b %H:%M') }}
+          </div>
+        </div>
+
+        <div class="fleet-findings">
+          {% if a.issues %}
+          {% for i in a.issues %}
+          <span
+            class="chip chip-{{ 'high' if i.severity == 'high' else ('low' if i.severity == 'low' else 'unknown') }}">
+            {{ location_label(i.location) }}
+            <em>{{ (i.presence_confidence * 100) | round | int }}%</em>
+          </span>
+          {% endfor %}
+          {% elif a.verdict == 'anomaly_detected_unattributed' %}
+          <span class="chip chip-unknown">Abnormal — cause not identified</span>
+          {% else %}
+          <span class="chip chip-ok">No issue detected</span>
+          {% endif %}
+        </div>
+
+        <div class="fleet-cost">
+          {% set band = cost_band(a) %}
+          {{ band and ('€' ~ band.min ~ '–' ~ band.max) or '—' }}
+        </div>
+
+        {# POST, not a link: a GET that deletes would be followed by any crawler or
+        prefetcher. The confirm() is the only guard against a misclick, since this
+        is not recoverable. #}
+        <form class="fleet-delete" method="post" action="{{ url_for('delete_analysis', analysis_id=a.id) }}"
+          onsubmit="return confirm('Delete the analysis of {{ a.motor_label|e }}? This cannot be undone.');">
+          <button type="submit" title="Delete this analysis" aria-label="Delete analysis of {{ a.motor_label }}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
+            </svg>
+          </button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% endif %}
+  </section>
+
+</main>
+{% endblock %}

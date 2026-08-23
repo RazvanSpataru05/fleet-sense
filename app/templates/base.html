@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}FleetSense{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script>
+    // Runs before first paint: applies a previously chosen theme so the page never
+    // flashes light before switching to dark. No stored choice = fall through to the
+    // stylesheet's prefers-color-scheme handling.
+    (function () {
+      try {
+        var t = localStorage.getItem("fleetsense-theme");
+        if (t === "dark" || t === "light") {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch (e) { /* private mode / storage blocked -- fall back to system preference */ }
+    })();
+  </script>
+  {% block head %}{% endblock %}
+</head>
+
+<body>
+
+  <header class="masthead">
+    <div class="masthead-inner">
+      <div class="wordmark">Fleet<span>Sense</span></div>
+      <div class="masthead-sub">Motor Current Signature Analysis</div>
+
+      {% if current_user.is_authenticated %}
+      <nav class="masthead-nav">
+        <a href="{{ url_for('fleet') }}" class="{{ 'is-current' if active_page == 'fleet' }}">Fleet</a>
+        <a href="{{ url_for('analyse_page') }}" class="{{ 'is-current' if active_page == 'analyse' }}">Analyse</a>
+        <a href="{{ url_for('maintenance') }}" class="{{ 'is-current' if active_page == 'maintenance' }}">Maintenance</a>
+      </nav>
+
+      <div class="account" id="account">
+        <button class="account-trigger" id="account-trigger" type="button"
+                aria-haspopup="true" aria-expanded="false">
+          {{ current_user.factory_name }}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+        <div class="account-menu" id="account-menu" hidden>
+          <div class="account-email">{{ current_user.email }}</div>
+          <a href="{{ url_for('logout') }}">Sign out</a>
+        </div>
+      </div>
+      {% endif %}
+
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch colour theme"
+        title="Switch colour theme">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" />
+          <path
+            d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  {% block content %}{% endblock %}
+
+  <script>
+    // ---- theme toggle ----
+    document.getElementById("theme-toggle").addEventListener("click", () => {
+      const root = document.documentElement;
+      // No explicit choice yet? Read what the system is currently giving us, so the
+      // first click always flips away from what the user is actually looking at.
+      const current = root.getAttribute("data-theme")
+        || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      const next = current === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("fleetsense-theme", next); } catch (e) { /* storage blocked */ }
+    });
+
+    // ---- account dropdown ----
+    (function () {
+      const trigger = document.getElementById("account-trigger");
+      if (!trigger) return;                       // signed out: no menu on the page
+      const menu = document.getElementById("account-menu");
+
+      const close = () => { menu.hidden = true; trigger.setAttribute("aria-expanded", "false"); };
+      const open = () => { menu.hidden = false; trigger.setAttribute("aria-expanded", "true"); };
+
+      trigger.addEventListener("click", (e) => {
+        e.stopPropagation();                      // else the document handler closes it again
+        menu.hidden ? open() : close();
+      });
+      document.addEventListener("click", (e) => {
+        if (!menu.hidden && !menu.contains(e.target)) close();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && !menu.hidden) { close(); trigger.focus(); }
+      });
+    })();
+  </script>
+
+  {% block scripts %}{% endblock %}
+
+</body>
+
+</html>

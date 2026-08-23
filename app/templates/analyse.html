@@ -1,0 +1,317 @@
+{% extends "base.html" %}
+{% set active_page = "analyse" %}
+{% block title %}Analyse — FleetSense{% endblock %}
+
+{% block head %}
+<script type="importmap">
+    {
+      "imports": {
+        "three": "{{ url_for('static', filename='js/vendor/three.module.js') }}",
+        "three/addons/controls/OrbitControls.js": "{{ url_for('static', filename='js/vendor/controls/OrbitControls.js') }}"
+      }
+    }
+  </script>
+<script type="module" src="{{ url_for('static', filename='js/motor.js') }}"></script>
+{% endblock %}
+
+{% block content %}
+<main class="shell">
+
+  <section class="panel">
+    <div class="panel-head">Recording</div>
+    <div class="panel-body">
+      <form id="form">
+        <div class="field">
+          <label class="field-label" for="motor_label">Motor</label>
+          <input type="text" id="motor_label" name="motor_label" maxlength="120" placeholder="e.g. Line 3 pump">
+          <p class="field-hint">Optional</p>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="file">Data file</label>
+          <label class="filepick" id="filepick">
+            <input type="file" id="file" name="file" accept=".csv,.txt">
+            <span class="filepick-name filepick-empty" id="filename">Choose a .csv or .txt file</span>
+          </label>
+          <p class="field-hint">Recording has to be minimum 60 s.
+          </p>
+        </div>
+
+        <div class="notice">
+          The sample rate is read from the recording itself. Anything other than
+          12.8&nbsp;kHz is rejected. The models are built around this rate and a
+          different one produces wrong results rather than less accurate ones.
+        </div>
+
+        <div class="field">
+          <button class="btn" id="submit" type="submit">Analyse</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">Analysis</div>
+    <div id="result">
+      <div class="placeholder">No recording analysed yet.</div>
+    </div>
+  </section>
+
+  <section class="viewer-section" id="viewer-section" hidden>
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-head-row">
+          <span>Motor Component View</span>
+          <button class="ghost-btn" id="reset-view" type="button">Reset view</button>
+        </div>
+      </div>
+      <div class="viewer" id="viewer" tabindex="0">
+        <div class="motor-tip" id="motor-tip" hidden></div>
+      </div>
+      <div class="motor-detail" id="motor-detail"></div>
+      <div class="legend">
+        <span class="legend-item"><span class="swatch ok"></span>No fault detected</span>
+        <span class="legend-item"><span class="swatch low"></span>Low severity</span>
+        <span class="legend-item"><span class="swatch unknown"></span>Detected (Severity not assessable)</span>
+        <span class="legend-item"><span class="swatch high"></span>High severity</span>
+      </div>
+    </div>
+  </section>
+
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+
+  const LOCATION_LABELS = {
+    bearing_outer: "Bearing — outer race",
+    bearing_inner: "Bearing — inner race",
+    bearing_ball: "Bearing — rolling element",
+    rotor_bar: "Broken rotor bar",
+    static_eccentricity: "Static eccentricity",
+    dynamic_eccentricity: "Dynamic eccentricity",
+    winding: "Stator winding",
+    voltage_unbalance: "Supply voltage unbalance",
+    bend: "Bent shaft",
+  };
+
+  const form = document.getElementById("form");
+  const fileIn = document.getElementById("file");
+  const filepick = document.getElementById("filepick");
+  const filename = document.getElementById("filename");
+  const submit = document.getElementById("submit");
+  const result = document.getElementById("result");
+
+  fileIn.addEventListener("change", () => {
+    const f = fileIn.files[0];
+    filename.textContent = f ? f.name : "Choose a .csv or .txt file";
+    filename.classList.toggle("filepick-empty", !f);
+    filepick.classList.toggle("is-set", !!f);
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!fileIn.files[0]) return;
+
+    const body = new FormData();
+    body.append("file", fileIn.files[0]);
+    const label = document.getElementById("motor_label").value.trim();
+    if (label) body.append("motor_label", label);
+    // No sample_rate field: the rate is derived from the recording's own time column.
+    // The API still accepts an explicit `sample_rate` for programmatic callers -- it
+    // just isn't something a UI user should be asked to assert, since 12800 is the
+    // only value that would ever pass.
+
+    submit.disabled = true;
+    result.innerHTML =
+      '<div class="loading">' +
+      '<div class="loading-label">Uploading and analysing. This takes a few seconds for a full recording.</div>' +
+      '<div class="bar"></div>' +
+      '</div>';
+
+    try {
+      const res = await fetch("/api/analyze", { method: "POST", body });
+      render(await res.json());
+    } catch (err) {
+      render({ verdict: "error", reason: "Could not reach the server: " + err.message });
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  const esc = (s) => String(s).replace(/[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  const viewerSection = document.getElementById("viewer-section");
+  let viewerReady = false;
+
+  // Built only once, and only when there's actually something to show -- no point
+  // spinning up a WebGL context for a visitor who never uploads anything.
+  function showViewer(issues) {
+    viewerSection.hidden = false;
+    if (!window.MotorViewer) return;   // module still loading; nothing to show yet
+    if (!viewerReady) {
+      window.MotorViewer.init(
+        document.getElementById("viewer"),
+        document.getElementById("motor-tip"),
+        document.getElementById("motor-detail")
+      );
+      viewerReady = true;
+    }
+    window.MotorViewer.update(issues);
+  }
+
+  document.getElementById("reset-view").addEventListener("click", () => {
+    if (viewerReady) window.MotorViewer.resetView();
+  });
+
+  const euro = (b) => "€" + b.min + "–" + b.max;
+
+  // Per-issue repair cost. A job reached from two detections of the same physical part,
+  // or already priced inside a larger job, is shown struck through -- the figure is real
+  // but must not be added again, and hiding it would look like a gap.
+  function costBlock(c) {
+    if (!c || !c.costed) return "";
+
+    const covered = !!c.covered_by;
+    const shared = c.shared_with && c.shared_with.length;
+    const notes = [];
+
+    if (covered) {
+      notes.push("Already included in <strong>" + esc(c.covered_by_label) + "</strong> below.");
+    } else if (shared) {
+      const others = c.shared_with.map((l) => LOCATION_LABELS[l] || l).join(", ");
+      notes.push("Same physical job as <strong>" + esc(others) + "</strong> — counted once.");
+    }
+    // Explanatory text comes from cost_reference.json, not from hardcoded strings here --
+    // otherwise editing the reference file would not change what anyone actually reads.
+    if (c.important) notes.push(esc(c.important));
+    if (c.confidence === "low" && c.confidence_note) {
+      notes.push("<strong>Estimate only</strong> — " + esc(c.confidence_note));
+    }
+    if (c.economic_alternative_cost_eur) {
+      notes.push("Alternative: " + esc(c.economic_alternative_label) + " " +
+        euro(c.economic_alternative_cost_eur) + "." +
+        (c.economic_note ? " " + esc(c.economic_note) : ""));
+    }
+
+    return '<div class="cost' + (covered ? " is-covered" : "") + '">' +
+      '<div class="cost-line">' +
+      '<span class="cost-action">' + esc(c.job_statement || c.job_label) + '</span>' +
+      '<span class="cost-figure">' + euro(c.cost_eur) + '</span>' +
+      '</div>' +
+      (notes.length ? '<div class="cost-note">' + notes.join(" ") + '</div>' : "") +
+      '</div>';
+  }
+
+  function totalsBlock(costs) {
+    if (!costs || !costs.summary) return "";
+    const s = costs.summary;
+    let html = '<div class="totals">';
+
+    // sub is optional; a row without it keeps label and figure on one line.
+    const totalRow = (label, sub, band) =>
+      '<div class="total-row">' +
+      '<span class="total-label">' + esc(label) +
+      (sub ? '<span class="total-sub">' + esc(sub) + '</span>' : "") +
+      '</span>' +
+      '<span class="total-figure">' + euro(band) + '</span>' +
+      '</div>';
+
+    if (s.motor_repair) {
+      html += totalRow("Estimated motor repair", null, s.motor_repair.cost_eur);
+    }
+    if (s.other_work) {
+      html += totalRow("Electrical supply work", "Separate trade and budget line",
+        s.other_work.cost_eur);
+    }
+
+    return html + '</div>';
+  }
+
+  function render(r) {
+    if (r.verdict === "rejected" || r.verdict === "cannot_process" || r.verdict === "error") {
+      viewerSection.hidden = true;
+      const title = r.verdict === "error" ? "Processing failed" : "File not accepted";
+      result.innerHTML =
+        '<div class="verdict ' + (r.verdict === "error" ? "critical" : "") + '">' +
+        '<div><div class="verdict-title">' + title + '</div></div>' +
+        '</div>' +
+        '<div class="reason">' + esc(r.reason || "No reason given.") + '</div>';
+      return;
+    }
+
+    const issues = r.issues || [];
+    const worst = issues.some((i) => i.severity === "high") ? "critical"
+      : issues.length ? "caution"
+        : r.layer1_anomalous ? "caution" : "ok";
+
+    let title, note;
+    if (r.verdict === "issues_detected") {
+      title = issues.length === 1 ? "1 issue detected" : issues.length + " issues detected";
+      note = r.layer1_anomalous
+        ? "Anomaly detection independently agrees this recording is abnormal."
+        : "Note: overall anomaly detection did not flag this recording — the finding below comes from per-location analysis alone.";
+    } else if (r.verdict === "anomaly_detected_unattributed") {
+      title = "Anomaly detected. Cause could not be identified";
+      note = "The recording is abnormal, but it does not match any fault signature the system can localise.";
+    } else {
+      title = "No issue detected";
+      note = "No anomaly has been detected. Recording is normal.";
+    }
+
+    const c = r.condition_detected || {};
+    const meta = [
+      ["Regime", r.regime === "torque_circulation" ? "Constant Speed" : "Constant Torque"],
+      ["Load", c.torque_nm != null ? c.torque_nm + " Nm" : "—"],
+      ["Speed", c.rpm != null ? c.rpm + " rpm" : "—"],
+      ["Duration", r.duration_sec != null ? r.duration_sec + " s" : "—"],
+      ["Sample rate", r.sample_rate != null ? (r.sample_rate / 1000) + " kHz" : "—"],
+      ["Anomaly index", r.layer1_anomaly_ratio != null ? r.layer1_anomaly_ratio + "×" : "—"],
+    ].map(([k, v]) =>
+      '<div class="meta-cell"><div class="meta-key">' + k + '</div>' +
+      '<div class="meta-val">' + esc(v) + '</div></div>').join("");
+
+    // Cost annotations arrive keyed alongside the issues, in the same order.
+    const costByLocation = {};
+    ((r.costs && r.costs.per_issue) || []).forEach((c) => { costByLocation[c.location] = c; });
+
+    const rows = issues.map((i) => {
+      const label = LOCATION_LABELS[i.location] || i.location;
+      const pct = Math.round((i.presence_confidence || 0) * 100);
+
+      let tag;
+      if (i.severity === "high") tag = '<span class="tag high">High severity</span>';
+      else if (i.severity === "low") tag = '<span class="tag low">Low severity</span>';
+      else tag = '<span class="tag unknown">Severity n/a</span>';
+
+      return '<div class="issue">' +
+        '<div class="issue-top">' +
+        '<div class="issue-name">' + esc(label) + '</div>' +
+        '<div class="issue-meta">' + tag +
+        '<span class="confidence">' + pct + '% confidence</span>' +
+        '</div>' +
+        '</div>' +
+        '<div class="meter"><div class="meter-fill" style="width:' + pct + '%"></div></div>' +
+        (i.caveat ? '<div class="caveat">' + esc(i.caveat) + '</div>' : "") +
+        costBlock(costByLocation[i.location]) +
+        '</div>';
+    }).join("");
+
+    result.innerHTML =
+      '<div class="verdict ' + worst + '">' +
+      '<div><div class="verdict-title">' + esc(title) + '</div>' +
+      '<div class="verdict-note">' + esc(note) + '</div></div>' +
+      '</div>' +
+      '<div class="meta">' + meta + '</div>' +
+      (rows ? '<div class="issues">' + rows + '</div>' : "") +
+      totalsBlock(r.costs) +
+      '<div class="footnote">Severity is only assessed for bearing faults; other locations are reported as presence only.</div>';
+
+    // Shown for every completed analysis, healthy or not.
+    showViewer(issues);
+  }
+
+</script>
+{% endblock %}
