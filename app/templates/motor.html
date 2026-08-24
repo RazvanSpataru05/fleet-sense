@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% set active_page = "fleet" %}
+{% block title %}{{ motor.name }} — FleetSense{% endblock %}
+
+{% block content %}
+<main class="fleet-shell">
+
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-head-row">
+        <span><a class="backlink" href="{{ url_for('fleet') }}">← Fleet</a> · {{ motor.name }}</span>
+        <span class="panel-count">
+          {{ motor.count }} recording{{ '' if motor.count == 1 else 's' }}
+        </span>
+      </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="motor-flash">
+      {% for category, msg in messages %}
+      <div class="{{ 'form-error' if category == 'error' else 'form-notice' }}">{{ msg }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    <div class="motor-actions">
+
+      <form class="motor-action" method="post" action="{{ url_for('rename_motor') }}"
+        onsubmit="return confirmRename(this);">
+        <input type="hidden" name="name" value="{{ motor.name }}">
+        <input type="text" id="new_name" name="new_name" maxlength="120" autocomplete="off" required
+          placeholder="{{ motor.name }}">
+        <button type="submit">Rename</button>
+      </form>
+
+      {# Only when there is somewhere to merge to. #}
+      {% if others %}
+      <form class="motor-action" method="post" action="{{ url_for('rename_motor') }}"
+        onsubmit="return confirmMerge(this);">
+        <input type="hidden" name="name" value="{{ motor.name }}">
+        <select id="merge_into" name="new_name" required>
+          <option value="" selected disabled>Choose a motor…</option>
+          {% for o in others %}
+          <option value="{{ o.name }}">
+            {{ o.name }} ({{ o.count }} recording{{ '' if o.count == 1 else 's' }})
+          </option>
+          {% endfor %}
+        </select>
+        <button type="submit">Merge</button>
+      </form>
+      {% endif %}
+
+    </div>
+
+    {# Newest first, same order as the roster's idea of "current". Reading downwards is
+    reading backwards in time, which is what makes a deterioration visible: the reader
+    compares the top row against the one under it. #}
+    <div class="fleet-list">
+      {% for a in motor.history %}
+      <div class="fleet-row tone-{{ a.worst_severity }}">
+        <div class="fleet-main">
+          <div class="fleet-name">
+            {{ a.created_at.strftime('%d %b %Y, %H:%M') }}
+            {% if loop.first and motor.count > 1 %}<span class="trend trend-current">Current</span>{% endif %}
+          </div>
+          <div class="fleet-meta">
+            {{ a.filename }}
+            <br>
+            {{ a.regime and (a.regime == 'torque_circulation' and 'Constant speed' or 'Constant torque') or '—' }}
+            · {{ a.torque_nm }} Nm · {{ a.rpm }} rpm
+          </div>
+        </div>
+
+        <div class="fleet-findings">
+          {% if a.issues %}
+          {% for i in a.issues %}
+          <span
+            class="chip chip-{{ 'high' if i.severity == 'high' else ('low' if i.severity == 'low' else 'unknown') }}">
+            {{ location_label(i.location) }}
+            <em>{{ (i.presence_confidence * 100) | round | int }}%</em>
+          </span>
+          {% endfor %}
+          {% elif a.verdict == 'anomaly_detected_unattributed' %}
+          <span class="chip chip-unknown">Abnormal: cause not identified</span>
+          {% else %}
+          <span class="chip chip-ok">No issue detected</span>
+          {% endif %}
+        </div>
+
+        <div class="fleet-cost">
+          {% set band = cost_band(a) %}
+          {{ band and ('€' ~ band.min ~ '–' ~ band.max) or '—' }}
+        </div>
+
+        {# POST, not a link: a GET that deletes would be followed by any crawler or
+        prefetcher. The confirm() is the only guard against a misclick, since this
+        is not recoverable. #}
+        <form class="fleet-delete" method="post" action="{{ url_for('delete_analysis', analysis_id=a.id) }}"
+          onsubmit="return confirm('Delete the {{ a.created_at.strftime('%d %b %H:%M') }} recording of {{ motor.name|e }}? This cannot be undone.');">
+          <button type="submit" title="Delete this recording"
+            aria-label="Delete the recording of {{ motor.name }} from {{ a.created_at.strftime('%d %b %H:%M') }}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
+            </svg>
+          </button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const OTHER_MOTORS = {{ others | tojson }};
+  const MOVING = {{ motor.count }};
+
+  function mergeWarning(targetName, targetCount) {
+    return confirm(
+      `Merge into "${targetName}"?
+
+${MOVING} recording${MOVING === 1 ? "" : "s"} will move across, giving ${MOVING + targetCount} in total.
+The two motors cannot be separated again afterwards.`);
+  }
+
+  function confirmMerge(form) {
+    const target = OTHER_MOTORS.find(m => m.name === form.new_name.value);
+    return target ? mergeWarning(target.name, target.count) : true;
+  }
+
+  function confirmRename(form) {
+    const key = form.new_name.value.trim().replace(/\s+/g, " ").toLowerCase();
+    const target = OTHER_MOTORS.find(m => m.key === key);
+    return target ? mergeWarning(target.name, target.count) : true;
+  }
+</script>
+{% endblock %}

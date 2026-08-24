@@ -23,11 +23,29 @@
       <form id="form">
         <div class="field">
           <label class="field-label" for="motor_label">Motor</label>
-          <input type="text" id="motor_label" name="motor_label" maxlength="120" placeholder="e.g. Line 3 pump">
-          <p class="field-hint">Optional</p>
+          {# list= offers the names already in use so the existing spelling is the easy
+          thing to pick. One machine typed three ways becomes three machines on the fleet
+          page, and picking beats retyping. Still a free-text input, so a genuinely new
+          motor needs no extra step. #}
+          <input type="text" id="motor_label" name="motor_label" maxlength="120" placeholder="e.g. Line 3 pump"
+            list="motor-names" autocomplete="off">
+          {% if motor_names %}
+          <datalist id="motor-names">
+            {% for name in motor_names %}<option value="{{ name }}"></option>{% endfor %}
+          </datalist>
+          {% endif %}
+          <p class="field-hint">Optional{{ ': pick an existing motor to add to its history' if motor_names }}</p>
         </div>
 
-        <div class="field">
+        <div class="field" id="archive-field" hidden>
+          <label class="field-label" for="s3_key">Stored recording</label>
+          <select id="s3_key" name="s3_key">
+            <option value="">Upload a file from this computer</option>
+          </select>
+          <p class="field-hint">Read inside AWS, so there is nothing to upload.</p>
+        </div>
+
+        <div class="field" id="upload-field">
           <label class="field-label" for="file">Data file</label>
           <label class="filepick" id="filepick">
             <input type="file" id="file" name="file" accept=".csv,.txt">
@@ -44,7 +62,7 @@
         </div>
 
         <div class="field">
-          <button class="btn" id="submit" type="submit">Analyse</button>
+          <button class="btn" id="submit" type="submit">Analyze</button>
         </div>
       </form>
     </div>
@@ -53,7 +71,7 @@
   <section class="panel">
     <div class="panel-head">Analysis</div>
     <div id="result">
-      <div class="placeholder">No recording analysed yet.</div>
+      <div class="placeholder">No recording analyzed yet.</div>
     </div>
   </section>
 
@@ -84,17 +102,11 @@
 {% block scripts %}
 <script>
 
-  const LOCATION_LABELS = {
-    bearing_outer: "Bearing — outer race",
-    bearing_inner: "Bearing — inner race",
-    bearing_ball: "Bearing — rolling element",
-    rotor_bar: "Broken rotor bar",
-    static_eccentricity: "Static eccentricity",
-    dynamic_eccentricity: "Dynamic eccentricity",
-    winding: "Stator winding",
-    voltage_unbalance: "Supply voltage unbalance",
-    bend: "Bent shaft",
-  };
+  {# Injected from LOCATION_LABELS in app.py rather than restated here.Two copies drift
+  the moment either one is edited, and the failure is quiet: this page would render a raw
+  key like "bearing_outer" while the fleet page shows the proper label. `tojson` escapes
+    for embedding inside < script >. #}
+  const LOCATION_LABELS = {{ location_labels | tojson }};
 
   const form = document.getElementById("form");
   const fileIn = document.getElementById("file");
@@ -110,12 +122,47 @@
     filepick.classList.toggle("is-set", !!f);
   });
 
+  const archiveField = document.getElementById("archive-field");
+  const archiveSel = document.getElementById("s3_key");
+  const uploadField = document.getElementById("upload-field");
+
+  // Filled from S3 when a bucket is configured, and left hidden otherwise -- local
+  // development looks exactly as it did before the archive existed.
+  fetch("/api/recordings")
+    .then((r) => r.json())
+    .then((d) => {
+      if (!d.enabled || !d.recordings.length) return;
+      for (const rec of d.recordings) {
+        const o = document.createElement("option");
+        o.value = rec.key;
+        o.textContent = rec.name + " (" + (rec.size_bytes / 1048576).toFixed(0) + " MB)";
+        archiveSel.appendChild(o);
+      }
+      archiveField.hidden = false;
+    })
+    .catch(() => { /* archive unreachable: upload still works, so stay quiet about it */ });
+
+  // The two sources are mutually exclusive, so picking one visibly retires the other
+  // rather than leaving both filled in and the precedence a mystery.
+  archiveSel.addEventListener("change", () => {
+    const fromArchive = !!archiveSel.value;
+    uploadField.hidden = fromArchive;
+    if (fromArchive) {
+      fileIn.value = "";
+      filename.textContent = "Choose a .csv or .txt file";
+      filename.classList.add("filepick-empty");
+      filepick.classList.remove("is-set");
+    }
+  });
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (!fileIn.files[0]) return;
+    const key = archiveSel.value;
+    if (!key && !fileIn.files[0]) return;
 
     const body = new FormData();
-    body.append("file", fileIn.files[0]);
+    if (key) body.append("s3_key", key);
+    else body.append("file", fileIn.files[0]);
     const label = document.getElementById("motor_label").value.trim();
     if (label) body.append("motor_label", label);
     // No sample_rate field: the rate is derived from the recording's own time column.
@@ -126,7 +173,10 @@
     submit.disabled = true;
     result.innerHTML =
       '<div class="loading">' +
-      '<div class="loading-label">Uploading and analysing. This takes a few seconds for a full recording.</div>' +
+      '<div class="loading-label">' +
+      (key ? 'Reading from the archive and analysing. This takes a few seconds.'
+        : 'Uploading and analysing. This takes a few seconds for a full recording.') +
+      '</div>' +
       '<div class="bar"></div>' +
       '</div>';
 
@@ -182,13 +232,13 @@
       notes.push("Already included in <strong>" + esc(c.covered_by_label) + "</strong> below.");
     } else if (shared) {
       const others = c.shared_with.map((l) => LOCATION_LABELS[l] || l).join(", ");
-      notes.push("Same physical job as <strong>" + esc(others) + "</strong> — counted once.");
+      notes.push("Same physical job as <strong>" + esc(others) + "</strong>: counted once.");
     }
     // Explanatory text comes from cost_reference.json, not from hardcoded strings here --
     // otherwise editing the reference file would not change what anyone actually reads.
     if (c.important) notes.push(esc(c.important));
     if (c.confidence === "low" && c.confidence_note) {
-      notes.push("<strong>Estimate only</strong> — " + esc(c.confidence_note));
+      notes.push("<strong>Estimate only:</strong> " + esc(c.confidence_note));
     }
     if (c.economic_alternative_cost_eur) {
       notes.push("Alternative: " + esc(c.economic_alternative_label) + " " +

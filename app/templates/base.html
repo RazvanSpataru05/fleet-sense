@@ -32,16 +32,16 @@
       {% if current_user.is_authenticated %}
       <nav class="masthead-nav">
         <a href="{{ url_for('fleet') }}" class="{{ 'is-current' if active_page == 'fleet' }}">Fleet</a>
-        <a href="{{ url_for('analyse_page') }}" class="{{ 'is-current' if active_page == 'analyse' }}">Analyse</a>
-        <a href="{{ url_for('maintenance') }}" class="{{ 'is-current' if active_page == 'maintenance' }}">Maintenance</a>
+        <a href="{{ url_for('analyse_page') }}" class="{{ 'is-current' if active_page == 'analyse' }}">Analyze</a>
+        <a href="{{ url_for('maintenance') }}"
+          class="{{ 'is-current' if active_page == 'maintenance' }}">Maintenance</a>
       </nav>
 
       <div class="account" id="account">
-        <button class="account-trigger" id="account-trigger" type="button"
-                aria-haspopup="true" aria-expanded="false">
+        <button class="account-trigger" id="account-trigger" type="button" aria-haspopup="true" aria-expanded="false">
           {{ current_user.factory_name }}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round" aria-hidden="true">
             <path d="M6 9l6 6 6-6" />
           </svg>
         </button>

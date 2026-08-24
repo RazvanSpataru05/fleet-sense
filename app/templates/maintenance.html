@@ -46,7 +46,7 @@
             </span>
             {% endfor %}
             {% elif a.verdict == 'anomaly_detected_unattributed' %}
-            <span class="chip chip-unknown">Abnormal — cause not identified</span>
+            <span class="chip chip-unknown">Abnormal: cause not identified</span>
             {% else %}
             <span class="chip chip-ok">No issue detected</span>
             {% endif %}
@@ -79,7 +79,7 @@
     <div class="notice">
       More than one recording selected for:
       <strong>{{ plan.duplicate_labels|join(', ') }}</strong>.
-      Each is planned as separate work — if they are the same machine, deselect the older one.
+      Each is planned as separate work. If they are the same machine, deselect the older one.
     </div>
     {% endif %}
 
@@ -110,7 +110,7 @@
       <div class="plan-cost">
         {% if e.cost_eur %}€{{ e.cost_eur.min }}–{{ e.cost_eur.max }}{% else %}—{% endif %}
         {% if e.other_eur %}
-        <div class="plan-cost-other">supply work — shared, below</div>
+        <div class="plan-cost-other">supply work (shared, below)</div>
         {% endif %}
       </div>
     </div>
@@ -129,31 +129,31 @@
     {% endif %}
 
     {% if plan.deferred %}
-    <div class="plan-group-head is-deferred-head">Deferred — no budget remaining</div>
+    <div class="plan-group-head is-deferred-head">Deferred: no budget remaining</div>
     <div class="plan-list">
       {% for e in plan.deferred %}{{ plan_row(e, deferred=true) }}{% endfor %}
     </div>
     {% endif %}
 
     {% if plan.electrical %}
-    <div class="plan-group-head">Plant-level — supply side</div>
+    <div class="plan-group-head">Plant-level: supply side</div>
     <div class="plan-list">
       <div class="plan-row {{ 'is-deferred' if not plan.electrical.scheduled }}">
         <div class="plan-rank">⚡</div>
         <div class="plan-body">
           <div class="plan-top"><span class="plan-name">Investigate and correct supply imbalance</span></div>
-          <div class="plan-action">Authorised electrician — switchgear, cabling and phase balance.</div>
+          <div class="plan-action">Authorised electrician: switchgear, cabling and phase balance.</div>
           <ul class="plan-reasons">
             <li>Detected on:
               <strong>{{ plan.electrical.machines|join(', ') }}</strong>.</li>
             <li>Charged after motor work, from the remaining budget.</li>
-            <li>Counted once, not per machine — an unbalanced feed affects every motor on
+            <li>Counted once, not per machine: an unbalanced feed affects every motor on
               it, so one visit corrects the root cause.
               {% if plan.electrical.machines|length > 1 %}
               If these machines are on separate feeds, budget one investigation per feed.
               {% endif %}
             </li>
-            <li>Not a motor repair — sending a motor workshop would find healthy motors
+            <li>Not a motor repair: sending a motor workshop would find healthy motors
               while the real fault continues.</li>
             {% if not plan.electrical.scheduled %}
             <li class="reason-blocking">Exceeds the budget by

@@ -9,25 +9,43 @@
     <div class="panel-head">
       <div class="panel-head-row">
         <span>{{ current_user.factory_name }}</span>
+        {% if motors %}
+        <span class="panel-count">{{ motors|length }} motor{{ '' if motors|length == 1 else 's' }}</span>
+        {% endif %}
       </div>
     </div>
 
-    {% if not analyses %}
+    {% if not motors %}
     <div class="placeholder">
       No recordings analysed yet.
       <a href="{{ url_for('analyse_page') }}">Upload your first one</a>.
     </div>
     {% else %}
 
+    {# One row per machine. Recordings live on the motor's own page, so a motor analysed
+    nine times is one line here rather than nine -- which is the whole point of the roster.
+    The row is a link, not a card with a delete button: deleting a single recording is a
+    per-recording action and belongs where the recordings are. #}
     <div class="fleet-list">
-      {% for a in analyses %}
-      <div class="fleet-row tone-{{ a.worst_severity }}">
+      {% for m in motors %}
+      {% set a = m.latest %}
+      <a class="fleet-row fleet-row--motor tone-{{ a.worst_severity }}"
+         href="{{ url_for('motor_detail', name=m.name) }}">
         <div class="fleet-main">
-          <div class="fleet-name">{{ a.motor_label }}</div>
+          <div class="fleet-name">
+            {{ m.name }}
+            {# Only worse/better are shown. Marking every repeat "stable" would put a badge
+            on nearly every row and train the eye to skip them. #}
+            {% if m.trend in ('worse', 'better') %}
+            <span class="trend trend-{{ m.trend }}">
+              {{ '↗' if m.trend == 'worse' else '↘' }}
+              {{ 'Worse than last check' if m.trend == 'worse' else 'Improved' }}
+            </span>
+            {% endif %}
+          </div>
           <div class="fleet-meta">
-            {{ a.regime and (a.regime == 'torque_circulation' and 'Constant speed' or 'Constant torque') or '—' }}
-            · {{ a.torque_nm }} Nm · {{ a.rpm }} rpm
-            · {{ a.created_at.strftime('%d %b %H:%M') }}
+            {{ m.count }} recording{{ '' if m.count == 1 else 's' }}
+            · last checked {{ a.created_at.strftime('%d %b %H:%M') }}
           </div>
         </div>
 
@@ -41,7 +59,7 @@
           </span>
           {% endfor %}
           {% elif a.verdict == 'anomaly_detected_unattributed' %}
-          <span class="chip chip-unknown">Abnormal — cause not identified</span>
+          <span class="chip chip-unknown">Abnormal: cause not identified</span>
           {% else %}
           <span class="chip chip-ok">No issue detected</span>
           {% endif %}
@@ -51,20 +69,7 @@
           {% set band = cost_band(a) %}
           {{ band and ('€' ~ band.min ~ '–' ~ band.max) or '—' }}
         </div>
-
-        {# POST, not a link: a GET that deletes would be followed by any crawler or
-        prefetcher. The confirm() is the only guard against a misclick, since this
-        is not recoverable. #}
-        <form class="fleet-delete" method="post" action="{{ url_for('delete_analysis', analysis_id=a.id) }}"
-          onsubmit="return confirm('Delete the analysis of {{ a.motor_label|e }}? This cannot be undone.');">
-          <button type="submit" title="Delete this analysis" aria-label="Delete analysis of {{ a.motor_label }}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round" aria-hidden="true">
-              <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
-            </svg>
-          </button>
-        </form>
-      </div>
+      </a>
       {% endfor %}
     </div>
 

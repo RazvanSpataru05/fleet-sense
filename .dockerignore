@@ -1,0 +1,30 @@
+# Docker does NOT read .gitignore, so everything has to be listed here explicitly.
+# Note the inverse of the git situation: .gitignore excludes *.pkl, but the trained models
+# MUST go into the image, so they are deliberately not excluded below.
+
+# The raw dataset is ~34 GB and inference never touches it -- verified by running the full
+# pipeline with the dataset directory pointed at a nonexistent path.
+dataset/
+
+# Regenerable feature caches, ~104 MB, used only for training/validation.
+**/classifier_cache/
+
+# Archived Paderborn exploration: not imported by the app, and the only thing that pulls in
+# matplotlib.
+src/paderborn/
+
+# Local development state
+.venv/
+.git/
+.gitignore
+.claude/
+**/__pycache__/
+**/*.pyc
+app/instance/
+*.db
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

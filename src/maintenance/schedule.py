@@ -81,7 +81,7 @@ def score_analysis(result: dict) -> dict:
             "score": UNLOCALISED_POINTS,
             "reasons": ["Layer 1 flagged this recording as abnormal, but no specific "
                         "cause could be localised."],
-            "action": "Inspect on site — the analysis cannot say which component.",
+            "action": "Inspect on site: the analysis cannot say which component.",
         }
 
     severities = [_severity_key(i) for i in issues]
@@ -100,7 +100,7 @@ def score_analysis(result: dict) -> dict:
         score += CORROBORATION_POINTS
         reasons.append("Anomaly detection independently agrees the machine is abnormal.")
     else:
-        reasons.append("Anomaly detection did not flag this recording — the finding rests "
+        reasons.append("Anomaly detection did not flag this recording: the finding rests "
                        "on per-location analysis alone.")
 
     extra = min((len(issues) - 1) * EXTRA_FINDING_POINTS, MAX_EXTRA_FINDING_POINTS)
@@ -113,7 +113,7 @@ def score_analysis(result: dict) -> dict:
     if cost and cost["max"] <= CHEAP_REPAIR_EUR and best_severity in ("high", "unknown"):
         score += LEVERAGE_POINTS
         reasons.append(f"Inexpensive to correct (EUR {cost['min']}-{cost['max']}) for the "
-                       f"severity involved — good value for a maintenance slot.")
+                       f"severity involved: good value for a maintenance slot.")
 
     if best_severity == "high":
         action = "Schedule at the next available maintenance window."
