@@ -156,7 +156,7 @@ def main():
         torque_nm, rpm = torque_nm.astype(int), rpm.astype(int)
         Y = build_multi_label(y)
 
-        file_true, file_pred_probs, file_names = validate_leave_one_condition_out(X, Y, torque_nm, rpm, y)
+        file_true, file_pred_probs, _ = validate_leave_one_condition_out(X, Y, torque_nm, rpm, y)
         report(file_true, file_pred_probs)
 
         print("\ntraining final deployable model on all available data...")

@@ -135,7 +135,7 @@ def _splice_test():
     spliced = pd.concat([df_speed.iloc[:half], df_torque.iloc[half:2 * half]], ignore_index=True)
 
     result = detect_regime(spliced)
-    print(f"\nSplice test (half speed_circulation + half torque_circulation, same 20Nm/1000rpm label):")
+    print("\nSplice test (half speed_circulation + half torque_circulation, same 20Nm/1000rpm label):")
     print(f"  torque_cv={result['torque_cv']:.4f}  regime={result['regime']}  confident={result['confident']}")
 
 

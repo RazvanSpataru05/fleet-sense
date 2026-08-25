@@ -294,7 +294,9 @@ input[type="text"]:focus {
      which widens that row's cost column, narrows its name column and shifts the findings
      column left. A floor width makes the tracks resolve identically across rows, and the
      auto ceiling means an unusually large figure still grows rather than being clipped. */
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) minmax(104px, auto) auto;
+  /* Leading `auto` is the radio that picks a recording to view. The roster's rows
+     override this wholesale and are unaffected. */
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1.6fr) minmax(104px, auto) auto;
   gap: 16px;
   align-items: center;
   padding: 13px 16px;
@@ -370,11 +372,11 @@ input[type="text"]:focus {
   gap: 14px;
   align-items: center;
   padding: 11px 16px;
-  border-bottom: 1px solid var(--border);
   cursor: pointer;
 }
 
-.select-row:last-child { border-bottom: 0; }
+.select-motor { border-bottom: 1px solid var(--border); }
+.select-motor:last-child { border-bottom: 0; }
 .select-row:hover { background: var(--surface-subtle); }
 .select-row input { accent-color: var(--petrol); width: 15px; height: 15px; }
 .select-name { font-weight: 600; font-size: 13px; }
@@ -1151,4 +1153,355 @@ input[type="number"]:focus {
   background: var(--ok-bg);
   color: var(--ok);
   font-size: 12.5px;
+}
+
+/* ---- Fault detail panel ---------------------------------------------------------------
+   Chips that have reference content are buttons; the rest stay inert spans. The button
+   needs a font/appearance reset or it inherits the browser control style and stops looking
+   like its neighbours. */
+
+.chip-detail {
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  appearance: none;
+}
+
+.chip-detail:hover { filter: brightness(0.97); }
+
+.chip-detail:focus-visible {
+  outline: 2px solid var(--petrol);
+  outline-offset: 1px;
+}
+
+/* Sits beside the content on wide screens, covers it on narrow ones. */
+.fault-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100vw);
+  height: 100vh;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: -8px 0 24px rgba(0, 0, 40, 0.10);
+}
+
+.fault-panel[hidden] { display: none; }
+
+.fault-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
+}
+
+.fault-panel-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+#fault-panel-close {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--text-muted);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#fault-panel-close:hover { color: var(--text); border-color: var(--text-muted); }
+#fault-panel-close:focus-visible { outline: 2px solid var(--petrol); outline-offset: 2px; }
+
+.fault-panel-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.fault-panel-body h3 {
+  margin: 18px 0 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fault-panel-body h3:first-child { margin-top: 0; }
+.fault-panel-body p { margin: 0 0 8px; }
+.fault-panel-body ul { margin: 0 0 8px; padding-left: 18px; }
+.fault-panel-body li { margin-bottom: 3px; }
+
+/* The validation figures, set in mono so they read as measurements rather than prose. */
+.fault-metrics {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.fault-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: rgba(0, 0, 40, 0.28);
+}
+
+.fault-backdrop[hidden] { display: none; }
+
+/* Beside the content, not over it, once there is room for both. */
+@media (min-width: 1100px) {
+  .fault-backdrop { display: none; }
+}
+
+/* The analyse page renders findings as rows, not chips, so its clickable name needs the
+   button appearance stripped back to the plain text it replaced. Underlined on hover
+   rather than always, so the results list does not read as a wall of links. */
+.issue-name-detail {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.issue-name-detail:hover { text-decoration: underline; }
+
+.issue-name-detail:focus-visible {
+  outline: 2px solid var(--petrol);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Click affordance in the 3D tooltip, shown only on parts that actually open a detail
+   panel. Quieter than the status line -- it is an invitation, not a finding. */
+.motor-tip-hint {
+  margin-top: 3px;
+  color: var(--petrol);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+/* ---- Ask box in the fault panel -------------------------------------------------------
+   Pinned under the scrolling body rather than inside it, so it stays reachable however far
+   the reader has scrolled. */
+
+.fault-ask {
+  flex: 0 0 auto;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-subtle);
+}
+
+.fault-ask-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fault-ask-row { display: flex; gap: 8px; }
+
+.fault-ask-row input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  padding: 7px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.fault-ask-row button {
+  flex: 0 0 auto;
+  padding: 7px 14px;
+  border: 1px solid var(--petrol);
+  border-radius: 3px;
+  background: var(--petrol);
+  color: #fff;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.fault-ask-row button:hover:not(:disabled) {
+  background: var(--petrol-dark);
+  border-color: var(--petrol-dark);
+}
+
+.fault-ask-row button:disabled { background: var(--disabled); border-color: var(--disabled); cursor: default; }
+.fault-ask-row button:focus-visible { outline: 2px solid var(--deep); outline-offset: 2px; }
+
+.fault-ask-answer {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--petrol);
+  border-radius: 3px;
+  background: var(--panel);
+  font-size: 12.5px;
+  line-height: 1.5;
+  max-height: 240px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.fault-ask-answer[hidden] { display: none; }
+.fault-ask-answer.is-error { border-left-color: var(--critical); color: var(--critical); }
+
+/* ---- Maintenance selection, grouped by motor -------------------------------------------
+   The repeating unit is now a machine, not a recording: one checkbox on the newest
+   reading, with the earlier ones collapsed underneath as context. */
+
+/* A motor whose latest recording gives the scheduler nothing to act on. Dimmed rather than
+   hidden -- a machine silently missing from the list is the failure worth avoiding. */
+.select-motor.is-blocked .select-row { cursor: default; opacity: 0.62; }
+.select-motor.is-blocked .select-row:hover { background: transparent; }
+
+.select-blocked { color: var(--caution); }
+
+.select-history {
+  padding: 0 16px 10px 45px;   /* aligned under the label, clear of the checkbox column */
+  font-size: 11.5px;
+}
+
+.select-history summary {
+  color: var(--petrol);
+  cursor: pointer;
+  padding: 2px 0;
+  list-style: revert;          /* keep the native disclosure triangle */
+}
+
+.select-history summary:focus-visible { outline: 2px solid var(--petrol); outline-offset: 2px; }
+
+.history-row {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 5px 0;
+  border-top: 1px solid var(--border);
+}
+
+.history-date { color: var(--text-muted); font-family: var(--mono); font-size: 11px; }
+.history-findings { display: flex; flex-wrap: wrap; gap: 5px; }
+
+@media (max-width: 760px) {
+  .select-history { padding-left: 16px; }
+  .history-row { grid-template-columns: 1fr; gap: 4px; }
+}
+
+/* ---- Pick a recording, view its stored analysis ---------------------------------------- */
+
+.row-select { accent-color: var(--petrol); width: 15px; height: 15px; margin: 0; cursor: pointer; }
+.fleet-name label { cursor: pointer; }
+
+/* Pushed to the far right of the actions row, away from rename and merge -- it navigates
+   away rather than changing anything, so it should not sit among the editing controls. */
+.motor-view {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 7px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.motor-view:hover:not(:disabled) { border-color: var(--petrol); color: var(--petrol); }
+.motor-view:focus-visible { outline: 2px solid var(--petrol); outline-offset: 2px; }
+.motor-view:disabled { color: var(--disabled); border-color: var(--border); cursor: default; }
+
+/* Header shown in place of the upload form when viewing something already stored. */
+.stored-head { padding: 14px 16px; }
+.stored-title { font-weight: 600; font-size: 14px; }
+.stored-meta { margin-top: 3px; color: var(--text-muted); font-size: 11.5px; }
+
+/* ---- Archive picker (multi-select) and batch progress ----------------------------------
+   The picker is a checkbox list rather than a <select multiple>: ten recordings fit
+   comfortably, and ticking is easier to hit than ctrl-clicking. */
+
+.archive-list {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--panel);
+}
+
+.archive-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.archive-item:last-child { border-bottom: 0; }
+.archive-item:hover { background: var(--surface-subtle); }
+.archive-item input { accent-color: var(--petrol); width: 15px; height: 15px; margin: 0; }
+.archive-size { color: var(--text-muted); font-family: var(--mono); font-size: 11px; }
+
+.batch-head, .batch-foot {
+  padding: 12px 16px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.batch-foot { border-top: 1px solid var(--border); }
+.batch-list { border-top: 1px solid var(--border); }
+
+.batch-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) minmax(0, 2fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+
+.batch-row:last-child { border-bottom: 0; }
+.batch-state { font-family: var(--mono); color: var(--text-muted); }
+.batch-name { font-family: var(--mono); font-size: 11.5px; }
+.batch-result { color: var(--text-muted); }
+
+.batch-row.is-running { background: var(--surface-subtle); }
+.batch-row.is-running .batch-state { color: var(--petrol); }
+.batch-row.is-done .batch-state { color: var(--ok); }
+.batch-row.is-failed .batch-state { color: var(--critical); }
+.batch-row.is-failed .batch-result { color: var(--critical); }
+
+.batch-view { margin-left: 6px; color: var(--petrol); }
+
+@media (max-width: 620px) {
+  .batch-row { grid-template-columns: 20px minmax(0, 1fr); }
+  .batch-result { grid-column: 2; }
 }

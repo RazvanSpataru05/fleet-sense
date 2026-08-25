@@ -35,3 +35,8 @@ cryptography==46.0.3
 # models must be unpickled by the exact versions that produced them, which has nothing to
 # do with an AWS SDK.
 boto3==1.43.78
+
+# Claude API, for the grounded question box in the fault detail panel. Same reasoning as
+# boto3 above: pinned for reproducible builds, but safe to bump freely -- it has nothing to
+# do with the trained models.
+anthropic==1.0.0

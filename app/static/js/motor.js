@@ -83,6 +83,11 @@ const PICK_PRIORITY = {
 };
 
 let renderer, scene, camera, controls, raycaster, container, tooltipEl, detailEl;
+
+/* Set by the page via onPartClick(). Called when a part carrying a flagged issue is
+   clicked, so the fault detail panel can open on the same locations the chips open --
+   clicking the bearing in the 3D view and clicking its chip should do the same thing. */
+let partClickHandler = null;
 let parts = {};          // id -> { group, fills[], edges[], status, issue }
 let pickables = [];      // meshes eligible for raycasting
 let hoveredId = null, pinnedId = null;
@@ -255,7 +260,7 @@ function describe(id) {
   const part = parts[id];
   const label = PART_LABEL[id] || id;
   if (!part || part.status === null) {
-    return { label, status: "No fault detected", tone: "ok", extra: null };
+    return { label, status: "No fault detected", tone: "ok", extra: null, hint: null };
   }
   const pct = Math.round((part.issue.presence_confidence || 0) * 100);
   return {
@@ -264,6 +269,9 @@ function describe(id) {
     tone: part.status,
     extra: `${pct}% confidence` + (BEARING_PARTS.has(id)
       ? " · the analysis does not identify which end (drive or non-drive)" : ""),
+    // Only offered when the page has actually wired a handler, so the tooltip never
+    // advertises a click that does nothing.
+    hint: partClickHandler ? "Click for more info" : null,
   };
 }
 
@@ -272,10 +280,12 @@ function updateTooltip(clientX, clientY) {
   const d = describe(hoveredId);
   tooltipEl.hidden = false;
   tooltipEl.className = "motor-tip tone-" + d.tone;
-  tooltipEl.innerHTML =
-    '<div class="motor-tip-name"></div><div class="motor-tip-status"></div>';
+  tooltipEl.innerHTML = '<div class="motor-tip-name"></div>' +
+    '<div class="motor-tip-status"></div>' +
+    (d.hint ? '<div class="motor-tip-hint"></div>' : "");
   tooltipEl.querySelector(".motor-tip-name").textContent = d.label;
   tooltipEl.querySelector(".motor-tip-status").textContent = d.status;
+  if (d.hint) tooltipEl.querySelector(".motor-tip-hint").textContent = d.hint;
 
   const r = container.getBoundingClientRect();
   const x = Math.min(clientX - r.left + 14, r.width - 210);
@@ -396,6 +406,10 @@ function init(el, tip, detail) {
       if (prev) paint(prev);
       if (next) paint(next);
       updateDetail();
+      // Pointer cursor only over a part that will actually open something. The canvas is
+      // draggable everywhere else, so `grab` stays the honest default.
+      const clickable = partClickHandler && next && parts[next] && parts[next].issue;
+      renderer.domElement.style.cursor = clickable ? "pointer" : "";
     }
     updateTooltip(e.clientX, e.clientY);
   });
@@ -415,6 +429,14 @@ function init(el, tip, detail) {
     if (prev) paint(prev);
     if (pinnedId) paint(pinnedId);
     updateDetail();
+
+    // Only a part that was actually flagged opens the detail panel. Clicking a healthy
+    // part still pins it, as before -- there is nothing to explain about a fault that
+    // was not found, and opening an empty panel would be worse than opening none.
+    const part = pinnedId && parts[pinnedId];
+    if (partClickHandler && part && part.issue) {
+      partClickHandler(pinnedId, part.issue);
+    }
   });
 
   loop();
@@ -472,26 +494,6 @@ function resetView() {
   controls.update();
 }
 
-/** Debug aid: the actual painted state of every part, straight off the materials. */
-function inspect() {
-  const out = {
-    _camera: {
-      x: +camera.position.x.toFixed(3),
-      y: +camera.position.y.toFixed(3),
-      z: +camera.position.z.toFixed(3),
-      azimuthDeg: +THREE.MathUtils.radToDeg(controls.getAzimuthalAngle()).toFixed(2),
-      polarDeg: +THREE.MathUtils.radToDeg(controls.getPolarAngle()).toFixed(2),
-      distance: +controls.getDistance().toFixed(3),
-    }
-  };
-  for (const [id, p] of Object.entries(parts)) {
-    out[id] = {
-      status: p.status,
-      edgeColor: "#" + p.edges[0].material.color.getHexString(),
-      fillOpacity: p.fills.length ? +p.fills[0].material.opacity.toFixed(3) : null,
-    };
-  }
-  return out;
-}
+function onPartClick(fn) { partClickHandler = fn; }
 
-window.MotorViewer = { init, update, resetView, inspect };
+window.MotorViewer = { init, update, resetView, onPartClick };

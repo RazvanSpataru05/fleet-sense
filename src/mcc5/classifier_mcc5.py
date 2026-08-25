@@ -3,7 +3,8 @@ Layer 2 as a real supervised classifier, trained on labeled fault data across al
 recording conditions per fault type (2 torque levels x 3 RPMs) -- not just the single
 condition (20Nm/1000rpm) the rest of this pipeline started scoped to.
 
-Why: diagnose_mcc5.py's reconstruction-error-ratio heuristic was hand-tuned against
+Why: the earlier reconstruction-error-ratio heuristic (diagnose_mcc5.py, since removed --
+this module replaced it entirely) was hand-tuned against
 exactly one file per fault type -- every threshold was fragile because there was nothing
 to average over (confirmed directly: mixed-fault validation showed real combo signal and
 single-fault noise landing in the same narrow band, with no single threshold able to

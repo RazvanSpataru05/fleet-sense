@@ -1,0 +1,31 @@
+{# Fault detail panel markup, included by both the motor history page and the analyse
+results. One panel is reused for every finding rather than one per finding: the content is
+filled in by static/js/faultpanel.js from the reference map injected out of faults.py.
+
+The backdrop only shows on narrow screens, where the panel covers the page instead of
+sitting beside it. #}
+<div class="fault-backdrop" id="fault-backdrop" hidden></div>
+<aside class="fault-panel" id="fault-panel" role="dialog" aria-modal="false"
+  aria-labelledby="fault-panel-title" hidden>
+  <div class="fault-panel-head">
+    <h2 id="fault-panel-title"></h2>
+    <button type="button" id="fault-panel-close" aria-label="Close details">&times;</button>
+  </div>
+  <div class="fault-panel-body" id="fault-panel-body"></div>
+
+  {# Rendered only when an API key is configured, the same way the S3 archive picker hides
+  itself when no bucket is set. The panel above is complete without this: the reference
+  content it draws on is on the server either way, so a deployment with no key loses the
+  question box and nothing else. #}
+  {% if explain_enabled %}
+  <form class="fault-ask" id="fault-ask">
+    <label class="fault-ask-label" for="fault-question">Ask about this finding</label>
+    <div class="fault-ask-row">
+      <input type="text" id="fault-question" maxlength="500" autocomplete="off"
+        placeholder="e.g. what usually causes this?">
+      <button type="submit" id="fault-ask-send">Ask</button>
+    </div>
+    <div class="fault-ask-answer" id="fault-ask-answer" role="status" aria-live="polite" hidden></div>
+  </form>
+  {% endif %}
+</aside>

@@ -30,6 +30,7 @@
       <form class="motor-action" method="post" action="{{ url_for('rename_motor') }}"
         onsubmit="return confirmRename(this);">
         <input type="hidden" name="name" value="{{ motor.name }}">
+        <label class="motor-action-label" for="new_name">Rename</label>
         <input type="text" id="new_name" name="new_name" maxlength="120" autocomplete="off" required
           placeholder="{{ motor.name }}">
         <button type="submit">Rename</button>
@@ -40,6 +41,7 @@
       <form class="motor-action" method="post" action="{{ url_for('rename_motor') }}"
         onsubmit="return confirmMerge(this);">
         <input type="hidden" name="name" value="{{ motor.name }}">
+        <label class="motor-action-label" for="merge_into">Merge into</label>
         <select id="merge_into" name="new_name" required>
           <option value="" selected disabled>Choose a motor…</option>
           {% for o in others %}
@@ -52,6 +54,11 @@
       </form>
       {% endif %}
 
+      {# Outside both forms, and far right. Disabled until a recording is picked below --
+      there is no sensible default, and defaulting to the newest would hide the fact that a
+      choice is being made. #}
+      <button type="button" class="motor-view" id="view-analysis" disabled>See analysis</button>
+
     </div>
 
     {# Newest first, same order as the roster's idea of "current". Reading downwards is
@@ -60,9 +67,14 @@
     <div class="fleet-list">
       {% for a in motor.history %}
       <div class="fleet-row tone-{{ a.worst_severity }}">
+        {# The URL comes from url_for rather than being assembled in JavaScript, so the
+        route exists in one place. #}
+        <input type="radio" name="view_target" class="row-select" id="pick-{{ a.id }}"
+          data-url="{{ url_for('view_analysis', analysis_id=a.id) }}"
+          aria-label="Select the recording from {{ a.created_at.strftime('%d %b %Y, %H:%M') }}">
         <div class="fleet-main">
           <div class="fleet-name">
-            {{ a.created_at.strftime('%d %b %Y, %H:%M') }}
+            <label for="pick-{{ a.id }}">{{ a.created_at.strftime('%d %b %Y, %H:%M') }}</label>
             {% if loop.first and motor.count > 1 %}<span class="trend trend-current">Current</span>{% endif %}
           </div>
           <div class="fleet-meta">
@@ -76,11 +88,27 @@
         <div class="fleet-findings">
           {% if a.issues %}
           {% for i in a.issues %}
-          <span
-            class="chip chip-{{ 'high' if i.severity == 'high' else ('low' if i.severity == 'low' else 'unknown') }}">
+          {% set tone = 'high' if i.severity == 'high' else ('low' if i.severity == 'low' else 'unknown') %}
+          {% set pct = (i.presence_confidence * 100) | round | int %}
+          {# A real <button>, not a clickable span: the panel has to be reachable by keyboard
+          and announced as opening a dialog. A location with no reference entry stays an
+          inert span rather than offering a click that opens nothing. Healthy findings are
+          never interactive -- there is nothing to explain about a fault that was not found. #}
+          {% if i.location in faults %}
+          <button type="button" class="chip chip-{{ tone }} chip-detail" data-location="{{ i.location }}"
+            data-confidence="{{ pct }}" data-severity="{{ i.severity }}"
+            data-recorded="{{ a.created_at.strftime('%d %b %Y') }}"
+            data-cost="{{ issue_cost(a, i.location) or '' }}" aria-haspopup="dialog"
+            aria-label="{{ location_label(i.location) }}, {{ pct }} percent — show details">
             {{ location_label(i.location) }}
-            <em>{{ (i.presence_confidence * 100) | round | int }}%</em>
+            <em>{{ pct }}%</em>
+          </button>
+          {% else %}
+          <span class="chip chip-{{ tone }}">
+            {{ location_label(i.location) }}
+            <em>{{ pct }}%</em>
           </span>
+          {% endif %}
           {% endfor %}
           {% elif a.verdict == 'anomaly_detected_unattributed' %}
           <span class="chip chip-unknown">Abnormal: cause not identified</span>
@@ -112,10 +140,13 @@
     </div>
   </section>
 
+  {% include "_fault_panel.html" %}
+
 </main>
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/faultpanel.js') }}"></script>
 <script>
   const OTHER_MOTORS = {{ others | tojson }};
   const MOVING = {{ motor.count }};
@@ -138,5 +169,39 @@ The two motors cannot be separated again afterwards.`);
     const target = OTHER_MOTORS.find(m => m.key === key);
     return target ? mergeWarning(target.name, target.count) : true;
   }
+
+  // ---- Fault detail panel ----------------------------------------------------------
+  // Content is injected from faults.py; the rendering lives in static/js/faultpanel.js so
+  // the analyse page reuses it rather than keeping a second copy.
+  FaultPanel.init({
+    faults: {{ faults | tojson }},
+    labels: {{ location_labels | tojson }},
+    recurrence: {{ recurrence | tojson }},
+    totalRecordings: {{ motor.count }},
+    motorName: {{ motor.name | tojson }},
+  });
+
+  // ---- Pick a recording, then view its stored analysis --------------------------------
+  const viewBtn = document.getElementById("view-analysis");
+  let viewUrl = null;
+
+  document.querySelectorAll(".row-select").forEach((radio) => {
+    radio.addEventListener("change", () => {
+      viewUrl = radio.dataset.url;
+      viewBtn.disabled = false;
+    });
+  });
+
+  viewBtn.addEventListener("click", () => {
+    if (viewUrl) window.location.href = viewUrl;
+  });
+
+  document.querySelectorAll(".chip-detail").forEach((b) => {
+    b.addEventListener("click", () => FaultPanel.open(b.dataset.location, {
+      confidence: b.dataset.confidence,
+      recorded: b.dataset.recorded,
+      cost: b.dataset.cost,
+    }, b));
+  });
 </script>
 {% endblock %}

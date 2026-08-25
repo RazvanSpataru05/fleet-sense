@@ -264,12 +264,15 @@ def negative_sequence_magnitude_for_file(df, f_e: float) -> float:
 # cleanly separates static_eccentricity_H/L (and their bearing-combo variants) from every
 # mechanical fault and from healthy. It does NOT separate dynamic_eccentricity at all --
 # scanned 1x through 5x harmonics and dynamic_eccentricity tracked healthy closely at every
-# one, so no formula is claimed for it; it stays undiagnosable for now, same as broken_bar.
+# one, so no formula is claimed for it and it has no targeted feature -- unlike broken_bar,
+# which since gained one (rotor_bar_frequency, the twice-slip sideband) and now validates
+# at F1 0.65. Dynamic eccentricity rests on the wide envelope band alone, and scores
+# accordingly: F1 0.15.
 # Also note: voltage_unbalance_L shows an even LARGER peak here than real eccentricity --
 # expected, since it's a broad disturbance that inflates nearly everything -- so this alone
-# doesn't discriminate eccentricity from voltage imbalance; that's left to the per-family
-# vs-generic-baseline gating in diagnose_mcc5.py, the same mechanism already relied on to
-# keep voltage_unbalance_L from hijacking the neg_seq family.
+# doesn't discriminate eccentricity from voltage imbalance. That separation is left to the
+# supervised per-location classifier in presence_mcc5.py, which sees every feature at once
+# rather than thresholding this one.
 STATIC_ECCENTRICITY_HARMONIC = 2  # multiple of shaft frequency
 
 

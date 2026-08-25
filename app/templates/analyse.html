@@ -17,6 +17,29 @@
 {% block content %}
 <main class="shell">
 
+  {# Viewing a stored analysis: the upload form is replaced by a header saying what is
+  being shown. Nothing is recomputed -- the result below is read from the database, and the
+  same render() draws it, so this page cannot drift from the one that follows an upload. #}
+  {% if stored %}
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-head-row">
+        <span>Stored analysis</span>
+        <span class="panel-count">
+          <a class="backlink" href="{{ url_for('motor_detail', name=stored.motor_label) }}">←
+            {{ stored.motor_label }}</a>
+        </span>
+      </div>
+    </div>
+    <div class="stored-head">
+      <div class="stored-title">{{ stored.motor_label }}</div>
+      <div class="stored-meta">
+        {{ stored.filename }} · analysed {{ stored.created_at.strftime('%d %b %Y, %H:%M') }}
+      </div>
+    </div>
+  </section>
+  {% else %}
+
   <section class="panel">
     <div class="panel-head">Recording</div>
     <div class="panel-body">
@@ -38,20 +61,18 @@
         </div>
 
         <div class="field" id="archive-field" hidden>
-          <label class="field-label" for="s3_key">Stored recording</label>
-          <select id="s3_key" name="s3_key">
-            <option value="">Upload a file from this computer</option>
-          </select>
-          <p class="field-hint">Read inside AWS, so there is nothing to upload.</p>
+          <span class="field-label">Stored recordings</span>
+          <div class="archive-list" id="archive-list"></div>
         </div>
 
         <div class="field" id="upload-field">
           <label class="field-label" for="file">Data file</label>
           <label class="filepick" id="filepick">
-            <input type="file" id="file" name="file" accept=".csv,.txt">
-            <span class="filepick-name filepick-empty" id="filename">Choose a .csv or .txt file</span>
+            <input type="file" id="file" name="file" accept=".csv,.txt" multiple>
+            <span class="filepick-name filepick-empty" id="filename">Choose .csv or .txt files</span>
           </label>
-          <p class="field-hint">Recording has to be minimum 60 s.
+          <p class="field-hint">Recording has to be minimum 60 s. Select several to analyse
+            them one after another.
           </p>
         </div>
 
@@ -67,6 +88,7 @@
       </form>
     </div>
   </section>
+  {% endif %}
 
   <section class="panel">
     <div class="panel-head">Analysis</div>
@@ -96,11 +118,21 @@
     </div>
   </section>
 
+  {% include "_fault_panel.html" %}
+
 </main>
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/faultpanel.js') }}"></script>
 <script>
+
+  // Same reference content as the motor page, rendered by the same module. No recurrence
+  // here: a fresh analysis has no history behind it yet.
+  FaultPanel.init({
+    faults: {{ faults | tojson }},
+    labels: {{ location_labels | tojson }},
+  });
 
   {# Injected from LOCATION_LABELS in app.py rather than restated here.Two copies drift
   the moment either one is edited, and the failure is quiet: this page would render a raw
@@ -115,86 +147,194 @@
   const submit = document.getElementById("submit");
   const result = document.getElementById("result");
 
-  fileIn.addEventListener("change", () => {
-    const f = fileIn.files[0];
-    filename.textContent = f ? f.name : "Choose a .csv or .txt file";
-    filename.classList.toggle("filepick-empty", !f);
-    filepick.classList.toggle("is-set", !!f);
-  });
+  // Upload-only wiring. In stored-view mode the form is not rendered, so every one of
+  // these elements is null -- guard once here rather than defensively at each use.
+  if (form) {
+    fileIn.addEventListener("change", () => {
+      const n = fileIn.files.length;
+      filename.textContent = n === 0 ? "Choose .csv or .txt files"
+        : n === 1 ? fileIn.files[0].name
+          : n + " files selected";
+      filename.classList.toggle("filepick-empty", n === 0);
+      filepick.classList.toggle("is-set", n > 0);
+    });
 
-  const archiveField = document.getElementById("archive-field");
-  const archiveSel = document.getElementById("s3_key");
-  const uploadField = document.getElementById("upload-field");
+    const archiveField = document.getElementById("archive-field");
+    const archiveList = document.getElementById("archive-list");
+    const uploadField = document.getElementById("upload-field");
 
-  // Filled from S3 when a bucket is configured, and left hidden otherwise -- local
-  // development looks exactly as it did before the archive existed.
-  fetch("/api/recordings")
-    .then((r) => r.json())
-    .then((d) => {
-      if (!d.enabled || !d.recordings.length) return;
-      for (const rec of d.recordings) {
-        const o = document.createElement("option");
-        o.value = rec.key;
-        o.textContent = rec.name + " (" + (rec.size_bytes / 1048576).toFixed(0) + " MB)";
-        archiveSel.appendChild(o);
+    const checkedKeys = () =>
+      [...archiveList.querySelectorAll("input:checked")].map((i) => i.value);
+
+    // Filled from S3 when a bucket is configured, and left hidden otherwise -- local
+    // development looks exactly as it did before the archive existed.
+    fetch("/api/recordings")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d.enabled || !d.recordings.length) return;
+        for (const rec of d.recordings) {
+          const row = document.createElement("label");
+          row.className = "archive-item";
+          const box = document.createElement("input");
+          box.type = "checkbox";
+          box.value = rec.key;
+          const name = document.createElement("span");
+          // textContent, not innerHTML: these names come from bucket keys.
+          name.textContent = rec.name;
+          const size = document.createElement("span");
+          size.className = "archive-size";
+          size.textContent = (rec.size_bytes / 1048576).toFixed(0) + " MB";
+          row.append(box, name, size);
+          archiveList.appendChild(row);
+        }
+        archiveField.hidden = false;
+      })
+      .catch(() => { /* archive unreachable: upload still works, so stay quiet about it */ });
+
+    // The two sources are mutually exclusive, so picking one visibly retires the other
+    // rather than leaving both filled in and the precedence a mystery.
+    archiveList.addEventListener("change", () => {
+      const fromArchive = checkedKeys().length > 0;
+      uploadField.hidden = fromArchive;
+      if (fromArchive) {
+        fileIn.value = "";
+        filename.textContent = "Choose a .csv or .txt file";
+        filename.classList.add("filepick-empty");
+        filepick.classList.remove("is-set");
       }
-      archiveField.hidden = false;
-    })
-    .catch(() => { /* archive unreachable: upload still works, so stay quiet about it */ });
+    });
 
-  // The two sources are mutually exclusive, so picking one visibly retires the other
-  // rather than leaving both filled in and the precedence a mystery.
-  archiveSel.addEventListener("change", () => {
-    const fromArchive = !!archiveSel.value;
-    uploadField.hidden = fromArchive;
-    if (fromArchive) {
-      fileIn.value = "";
-      filename.textContent = "Choose a .csv or .txt file";
-      filename.classList.add("filepick-empty");
-      filepick.classList.remove("is-set");
-    }
-  });
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const keys = checkedKeys();
+      const files = [...fileIn.files];
+      if (!keys.length && !files.length) return;
+      const label = document.getElementById("motor_label").value.trim();
 
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const key = archiveSel.value;
-    if (!key && !fileIn.files[0]) return;
+      // One work item per recording, from whichever source was used. The two are mutually
+      // exclusive in the UI, so archive selections win if both somehow ended up set.
+      const items = keys.length
+        ? keys.map((k) => ({ name: k.split("/").pop(), field: "s3_key", value: k }))
+        : files.map((f) => ({ name: f.name, field: "file", value: f }));
 
-    const body = new FormData();
-    if (key) body.append("s3_key", key);
-    else body.append("file", fileIn.files[0]);
-    const label = document.getElementById("motor_label").value.trim();
-    if (label) body.append("motor_label", label);
-    // No sample_rate field: the rate is derived from the recording's own time column.
-    // The API still accepts an explicit `sample_rate` for programmatic callers -- it
-    // just isn't something a UI user should be asked to assert, since 12800 is the
-    // only value that would ever pass.
+      // Several recordings become a progress list; a single one keeps the full result
+      // panel and the 3D viewer, whichever source it came from.
+      if (items.length > 1) return runBatch(items, label);
 
-    submit.disabled = true;
-    result.innerHTML =
-      '<div class="loading">' +
-      '<div class="loading-label">' +
-      (key ? 'Reading from the archive and analysing. This takes a few seconds.'
-        : 'Uploading and analysing. This takes a few seconds for a full recording.') +
-      '</div>' +
-      '<div class="bar"></div>' +
-      '</div>';
+      const body = new FormData();
+      body.append(items[0].field, items[0].value);
+      if (label) body.append("motor_label", label);
+      // No sample_rate field: the rate is derived from the recording's own time column.
+      // The API still accepts an explicit `sample_rate` for programmatic callers -- it
+      // just isn't something a UI user should be asked to assert, since 12800 is the
+      // only value that would ever pass.
 
-    try {
-      const res = await fetch("/api/analyze", { method: "POST", body });
-      render(await res.json());
-    } catch (err) {
-      render({ verdict: "error", reason: "Could not reach the server: " + err.message });
-    } finally {
+      submit.disabled = true;
+      result.innerHTML =
+        '<div class="loading">' +
+        '<div class="loading-label">' +
+        (items[0].field === "s3_key"
+          ? 'Reading from the archive and analysing. This takes a few seconds.'
+          : 'Uploading and analysing. This takes a few seconds for a full recording.') +
+        '</div>' +
+        '<div class="bar"></div>' +
+        '</div>';
+
+      try {
+        const res = await fetch("/api/analyze", { method: "POST", body });
+        render(await res.json());
+      } catch (err) {
+        render({ verdict: "error", reason: "Could not reach the server: " + err.message });
+      } finally {
+        submit.disabled = false;
+      }
+    });
+
+    /* Sequential, not parallel: each analysis is CPU-heavy feature extraction over a
+       ~113 MB recording, and several at once on a 2-vCPU task would thrash. Running them
+       one at a time also keeps every request short instead of one request hanging for
+       minutes, and lets a single failure mark its own row and move on.
+
+       Nothing is shown expanded afterwards -- with several results there is no defensible
+       "the" one to show -- so each finished row links to its stored analysis instead. */
+    async function runBatch(items, label) {
+      submit.disabled = true;
+      viewerSection.hidden = true;
+
+      result.innerHTML =
+        '<div class="batch-head">Analysing ' + items.length + ' recordings, one at a time. ' +
+        'Leaving this page stops the ones not yet started.</div>' +
+        '<div class="batch-list">' +
+        items.map((it, i) =>
+          '<div class="batch-row" id="batch-' + i + '">' +
+          '<span class="batch-state">·</span>' +
+          '<span class="batch-name">' + esc(it.name) + '</span>' +
+          '<span class="batch-result">queued</span>' +
+          '</div>').join("") +
+        '</div>';
+
+      let done = 0;
+      for (let i = 0; i < items.length; i++) {
+        const row = document.getElementById("batch-" + i);
+        row.className = "batch-row is-running";
+        row.querySelector(".batch-state").textContent = "⋯";
+        row.querySelector(".batch-result").textContent = "analysing…";
+
+        const body = new FormData();
+        body.append(items[i].field, items[i].value);
+        if (label) body.append("motor_label", label);
+
+        let data;
+        try {
+          const res = await fetch("/api/analyze", { method: "POST", body });
+          data = await res.json();
+        } catch (err) {
+          data = { verdict: "error", reason: "Could not reach the server: " + err.message };
+        }
+        done += fillBatchRow(row, data) ? 1 : 0;
+      }
+
+      result.insertAdjacentHTML("beforeend",
+        '<div class="batch-foot">' + done + ' of ' + items.length + ' analysed. ' +
+        '<a href="/">See them on the fleet page</a>.</div>');
       submit.disabled = false;
     }
-  });
+
+    /* Returns whether the recording was actually analysed, so the footer can count. */
+    function fillBatchRow(row, data) {
+      const ok = data.verdict !== "rejected" && data.verdict !== "error"
+        && data.verdict !== "cannot_process";
+      row.className = "batch-row " + (ok ? "is-done" : "is-failed");
+      row.querySelector(".batch-state").textContent = ok ? "✓" : "✗";
+
+      const cell = row.querySelector(".batch-result");
+      if (!ok) {
+        cell.textContent = data.reason || data.verdict;
+        return false;
+      }
+
+      const issues = data.issues || [];
+      const summary = issues.length
+        ? issues.map((i) => esc(LOCATION_LABELS[i.location] || i.location)).join(" · ")
+        : (data.verdict === "anomaly_detected_unattributed"
+          ? "abnormal, cause not identified" : "no issue detected");
+      cell.innerHTML = summary +
+        (data.analysis_id
+          ? ' <a class="batch-view" href="/analysis/' + data.analysis_id + '">View</a>' : "");
+      return true;
+    }
+
+  }
 
   const esc = (s) => String(s).replace(/[&<>"']/g,
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   const viewerSection = document.getElementById("viewer-section");
   let viewerReady = false;
+
+  // Per-location cost bands from the last analysis, shared between the issue rows and the
+  // 3D viewer's click handler.
+  let costByLocation = {};
 
   // Built only once, and only when there's actually something to show -- no point
   // spinning up a WebGL context for a visitor who never uploads anything.
@@ -208,6 +348,16 @@
         document.getElementById("motor-detail")
       );
       viewerReady = true;
+      // Clicking a flagged part in the 3D view opens the same panel its chip opens.
+      // Bound once, since the viewer is built once and only re-fed with new issues.
+      window.MotorViewer.onPartClick((partId, issue) => {
+        const band = costByLocation[issue.location];
+        FaultPanel.open(issue.location, {
+          confidence: Math.round((issue.presence_confidence || 0) * 100),
+          severity: issue.severity,
+          cost: band && band.cost_eur ? `€${band.cost_eur.min}–${band.cost_eur.max}` : null,
+        });
+      });
     }
     window.MotorViewer.update(issues);
   }
@@ -324,7 +474,9 @@
       '<div class="meta-val">' + esc(v) + '</div></div>').join("");
 
     // Cost annotations arrive keyed alongside the issues, in the same order.
-    const costByLocation = {};
+    // Module-scoped, not local: the 3D viewer's click handler needs the same lookup, and
+    // it runs outside this function.
+    costByLocation = {};
     ((r.costs && r.costs.per_issue) || []).forEach((c) => { costByLocation[c.location] = c; });
 
     const rows = issues.map((i) => {
@@ -336,9 +488,25 @@
       else if (i.severity === "low") tag = '<span class="tag low">Low severity</span>';
       else tag = '<span class="tag unknown">Severity n/a</span>';
 
+      // A real button when there is reference content to show, an inert div otherwise --
+      // same rule as the motor page, so a click never opens an empty panel.
+      // The per-finding band, so "how much will this cost?" is answerable from the page's
+      // own numbers rather than refused.
+      const band = costByLocation[i.location];
+      const costAttr = band && band.cost_eur
+        ? ' data-cost="€' + band.cost_eur.min + '–' + band.cost_eur.max + '"' : "";
+
+      const nameHtml = window.FaultPanel && FaultPanel.has(i.location)
+        ? '<button type="button" class="issue-name issue-name-detail" ' +
+        'data-location="' + esc(i.location) + '" data-confidence="' + pct + '"' + costAttr +
+        ' data-severity="' + esc(i.severity || "") + '" ' +
+        'aria-haspopup="dialog" aria-label="' + esc(label) + ', ' + pct +
+        ' percent — show details">' + esc(label) + '</button>'
+        : '<div class="issue-name">' + esc(label) + '</div>';
+
       return '<div class="issue">' +
         '<div class="issue-top">' +
-        '<div class="issue-name">' + esc(label) + '</div>' +
+        nameHtml +
         '<div class="issue-meta">' + tag +
         '<span class="confidence">' + pct + '% confidence</span>' +
         '</div>' +
@@ -359,9 +527,26 @@
       totalsBlock(r.costs) +
       '<div class="footnote">Severity is only assessed for bearing faults; other locations are reported as presence only.</div>';
 
+    // Bound after the rows are in the DOM -- they are rebuilt on every analysis, so the
+    // listeners have to be reattached each time rather than bound once at page load.
+    result.querySelectorAll(".issue-name-detail").forEach((b) => {
+      b.addEventListener("click", () => FaultPanel.open(b.dataset.location, {
+        confidence: b.dataset.confidence,
+        severity: b.dataset.severity,
+        cost: b.dataset.cost,
+      }, b));
+    });
+
     // Shown for every completed analysis, healthy or not.
     showViewer(issues);
   }
 
+  {% if stored %}
+  // A stored analysis, drawn by the same render() an upload uses -- so this page cannot
+  // drift from the live one. Deferred to `load` because motor.js is a module and therefore
+  // deferred itself: showViewer() bails out quietly when MotorViewer is not defined yet,
+  // and the 3D view would simply never appear.
+  window.addEventListener("load", () => render({{ stored.result | tojson }}));
+  {% endif %}
 </script>
 {% endblock %}

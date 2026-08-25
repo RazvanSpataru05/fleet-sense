@@ -1,10 +1,14 @@
 """
-FleetSense web app -- first version. Upload a recording, run it through validation and
-the real Layer 1/2 pipeline (pipeline_mcc5.check_motor), get the result back as JSON.
+FleetSense web app. A recording goes through validation and the Layer 1/2 pipeline
+(pipeline_mcc5.check_motor); costs (Layer 3) and the budget scheduler are composed on top
+of the result here rather than inside the model code, so the diagnosis stays cost-unaware
+and the cost layer stays model-unaware.
 
-No aesthetics, no health checks, no load balancing yet -- explicitly deferred until the
-cloud deployment phase. ML code stays entirely in src/mcc5, imported here rather than
-duplicated, so the two can be containerized separately later if that ends up making sense.
+ML code lives entirely in src/mcc5 and is imported, never duplicated, so the two could be
+containerized separately if that ever became useful.
+
+Recordings are grouped by motor for display: the fleet page, the motor history page and
+the maintenance plan all key off _motor_key, so one machine is one row wherever it appears.
 """
 import os
 import sys
@@ -27,13 +31,24 @@ from schedule import build_plan  # noqa: E402
 # stays dataset-specific and cost-unaware, and the cost layer stays model-unaware.
 from models import db, User, Analysis  # noqa: E402
 import archive  # noqa: E402
+import explain  # noqa: E402
+from faults import FAULTS  # noqa: E402
 
 app = Flask(__name__)
 
 # Config comes from the environment so the same image runs locally and on AWS.
 # DATABASE_URL unset -> local SQLite file; set to a mysql+pymysql://... URL -> RDS.
+# Pinned to this file's own directory rather than app.instance_path. Flask derives that
+# path from the import name, which resolves differently for `python app/app.py` than for
+# importing the module -- so the project silently kept TWO SQLite files, app/instance/ and
+# instance/, and whichever one the app wrote to was invisible to the other. Symptom was a
+# login that worked one day and failed the next against an empty database. An explicit path
+# has no such ambiguity. Only affects local development; DATABASE_URL wins when set, which
+# is always the case in the container.
+LOCAL_DB = Path(__file__).resolve().parent / "instance" / "fleetsense.db"
+LOCAL_DB.parent.mkdir(parents=True, exist_ok=True)
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
-    "DATABASE_URL", f"sqlite:///{Path(app.instance_path) / 'fleetsense.db'}")
+    "DATABASE_URL", f"sqlite:///{LOCAL_DB}")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 # Reconnect rather than hand out a connection RDS has already dropped.
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True, "pool_recycle": 280}
@@ -49,7 +64,6 @@ app.secret_key = os.environ.get("SECRET_KEY", "dev-only-insecure-key")
 if app.secret_key == "dev-only-insecure-key" and not app.debug:
     print("WARNING: SECRET_KEY is unset; sessions are forgeable. Set it before deploying.")
 
-Path(app.instance_path).mkdir(parents=True, exist_ok=True)
 db.init_app(app)
 
 login_manager = LoginManager(app)
@@ -87,6 +101,35 @@ def _cost_band(analysis):
     if not summary or not summary.get("motor_repair"):
         return None
     return summary["motor_repair"]["cost_eur"]
+
+
+def _issue_cost(analysis, location):
+    """The estimated band for ONE location in an analysis, as the string the UI shows.
+
+    _cost_band above is the whole-analysis motor-repair total; this is the per-finding
+    figure that sits behind an individual chip, which is what a question about "this
+    fault" should be answered with."""
+    for entry in ((analysis.result or {}).get("costs") or {}).get("per_issue") or []:
+        if entry.get("location") == location and entry.get("cost_eur"):
+            band = entry["cost_eur"]
+            return f"€{band['min']}–{band['max']}"
+    return None
+
+
+def _not_plannable(analysis):
+    """Why this recording cannot enter a plan, or None if it can.
+
+    A reason rather than a bare bool: a motor that drops out of planning should say why.
+    Silently omitting a machine the manager knows is faulty is the failure mode worth
+    designing against -- they would simply not notice it was missing."""
+    if analysis.issues:
+        return None
+    if analysis.verdict == "anomaly_detected_unattributed":
+        # No located fault, but "inspect on site" is still work the scheduler can plan.
+        return None
+    if analysis.verdict in ("cannot_process", "rejected", "error"):
+        return "latest recording could not be processed — re-measure"
+    return "no findings in the latest recording"
 
 
 _SEVERITY_RANK = {"none": 0, "unknown": 1, "low": 2, "high": 3}
@@ -140,11 +183,13 @@ def _group_by_motor(analyses):
     for motor in motors.values():
         motor["count"] = len(motor["history"])
         motor["trend"] = _trend(motor["history"])
-    # Worst first, then most recently seen. "What needs me today" is a different question
-    # from "what happened most recently", and the roster answers the first one.
+    # Most recently analysed first. Severity-first ordering was tried and read as arbitrary:
+    # a motor analysed a minute ago could sit in the middle of the list because two others
+    # scored worse, so the list did not respond to what the user had just done. Recency is
+    # predictable, and severity is still obvious at a glance from the tone stripe and chips.
+    # Name breaks ties so the order is stable when timestamps collide.
     return sorted(motors.values(),
-                  key=lambda m: (-_SEVERITY_RANK[m["latest"].worst_severity],
-                                 -m["latest"].created_at.timestamp()))
+                  key=lambda m: (-m["latest"].created_at.timestamp(), m["key"]))
 
 
 @app.route("/")
@@ -183,20 +228,54 @@ def motor_detail():
     # browser uses the counts to say what a merge would actually combine.
     others = [{"key": m["key"], "name": m["name"], "count": m["count"]}
               for m in motors if m["key"] != key]
+
+    # How often each location has been flagged across this motor's recordings. This is what
+    # keeps the detail panel from being a glossary: reference text describes a fault type,
+    # while "flagged in 3 of 4 recordings since 18 Aug" describes this machine. Iterated
+    # oldest-first so `first` is genuinely the earliest occurrence.
+    recurrence = {}
+    for a in reversed(motor["history"]):
+        for issue in a.issues:
+            location = issue.get("location")
+            if location not in FAULTS:
+                continue
+            seen = recurrence.setdefault(
+                location, {"count": 0, "first": a.created_at.strftime("%d %b %Y")})
+            seen["count"] += 1
+
     return render_template("motor.html", motor=motor, others=others,
+                           faults=FAULTS, recurrence=recurrence,
+                           explain_enabled=explain.is_enabled(),
                            location_label=lambda k: LOCATION_LABELS.get(k, k),
-                           cost_band=_cost_band)
+                           location_labels=LOCATION_LABELS,
+                           cost_band=_cost_band, issue_cost=_issue_cost)
 
 
 @app.route("/maintenance", methods=["GET", "POST"])
 @login_required
 def maintenance():
-    """Selection then plan. The manager decides which recordings are in scope -- some
-    machines are not their responsibility, and the same motor may appear more than once
-    with only one recording worth acting on. Nothing is auto-selected away."""
+    """Selection then plan, one row per machine rather than one per recording.
+
+    You repair a motor, not a file, so selection is per motor and only its NEWEST recording
+    can enter a plan. Budgeting from a superseded reading is the mistake condition
+    monitoring exists to prevent, and restricting it here also makes the old double-count
+    warning ("if they are the same machine, deselect the older one") structurally
+    impossible instead of something the reader has to remember to act on.
+
+    The manager still decides which machines are in scope -- some are not their
+    responsibility -- so nothing is auto-selected away.
+    """
     analyses = (current_user.analyses
                 .order_by(Analysis.created_at.desc())
                 .all())
+    motors = _group_by_motor(analyses)
+    for motor in motors:
+        motor["blocked"] = _not_plannable(motor["latest"])
+
+    # Only a motor's newest recording is ever plannable. Enforced here and not just by
+    # rendering the older ones without a checkbox, because the form is not the only thing
+    # that can POST to this endpoint.
+    selectable = {m["latest"].id for m in motors if not m["blocked"]}
 
     plan, budget_error, budget_value = None, None, ""
     if request.method == "POST":
@@ -211,16 +290,80 @@ def maintenance():
             if budget <= 0:
                 budget_error = "The budget must be greater than zero."
             else:
-                chosen = set(request.form.getlist("include", type=int))
-                # Filtered from the user's OWN analyses, so a posted id belonging to
-                # somebody else never matches rather than needing a separate check.
+                # Intersected with `selectable`, so an id for an older recording -- or one
+                # belonging to somebody else, which is not in this user's motors at all --
+                # is dropped rather than planned.
+                chosen = set(request.form.getlist("include", type=int)) & selectable
                 selected = [a for a in analyses if a.id in chosen]
                 plan = build_plan([{"id": a.id, "label": a.motor_label, "result": a.result}
                                    for a in selected], budget)
 
-    return render_template("maintenance.html", analyses=analyses, plan=plan,
+    return render_template("maintenance.html", motors=motors, plan=plan,
                            budget_error=budget_error, budget_value=budget_value,
                            location_label=lambda k: LOCATION_LABELS.get(k, k))
+
+
+@app.route("/api/explain", methods=["POST"])
+@login_required
+def explain_finding():
+    """One grounded answer about one finding.
+
+    The browser posts WHICH fault it is asking about, never the reference content itself --
+    that is looked up server-side from FAULTS. A page with modified JavaScript therefore
+    cannot feed the model its own context and have the answer come back wearing this
+    system's authority.
+    """
+    payload = request.get_json(silent=True) or {}
+    fault = FAULTS.get(payload.get("location", ""))
+    if fault is None:
+        return jsonify({"error": "Unknown fault location."}), 400
+
+    try:
+        text = explain.answer(
+            fault,
+            LOCATION_LABELS.get(payload["location"], payload["location"]),
+            # Observed values for this particular finding. They come from the page, which
+            # is fine: they are the user's own analysis either way, so the worst a modified
+            # page achieves is misleading itself.
+            {"confidence": payload.get("confidence"),
+             "severity": payload.get("severity"),
+             "recorded": payload.get("recorded"),
+             "motor": payload.get("motor"),
+             "cost": payload.get("cost"),
+             "recurrence": payload.get("recurrence")},
+            payload.get("question", ""))
+    except explain.ExplainError as e:
+        # 400 with a readable reason, matching /api/analyze -- a stale key or an empty
+        # question is a request problem, and the panel shows the text as-is.
+        return jsonify({"error": str(e)}), 400
+
+    return jsonify({"answer": text})
+
+
+@app.route("/analysis/<int:analysis_id>")
+@login_required
+def view_analysis(analysis_id):
+    """A stored analysis, rendered by the same code that renders a fresh one.
+
+    Nothing is recomputed. Analysis.result holds the complete pipeline output -- the exact
+    JSON /api/analyze returns -- so the results panel, the cost blocks, the 3D viewer and
+    the fault panel all work from the database alone. The recording itself is never needed;
+    the viewer only ever sees the issues list.
+    """
+    analysis = db.session.get(Analysis, analysis_id)
+    # 404 rather than 403 when it belongs to somebody else, matching delete_analysis:
+    # replying "forbidden" would confirm the id exists.
+    if analysis is None or analysis.user_id != current_user.id:
+        abort(404)
+
+    analyses = (current_user.analyses
+                .order_by(Analysis.created_at.desc())
+                .all())
+    return render_template("analyse.html",
+                           motor_names=[m["name"] for m in _group_by_motor(analyses)],
+                           location_labels=LOCATION_LABELS, faults=FAULTS,
+                           explain_enabled=explain.is_enabled(),
+                           stored=analysis)
 
 
 @app.route("/motor/rename", methods=["POST"])
@@ -289,7 +432,7 @@ def delete_analysis(analysis_id):
     return redirect(url_for("fleet"))
 
 
-@app.route("/analyse")
+@app.route("/analyze")
 @login_required
 def analyse_page():
     analyses = (current_user.analyses
@@ -300,7 +443,8 @@ def analyse_page():
     # away afterwards.
     return render_template("analyse.html",
                            motor_names=[m["name"] for m in _group_by_motor(analyses)],
-                           location_labels=LOCATION_LABELS)
+                           location_labels=LOCATION_LABELS, faults=FAULTS,
+                           explain_enabled=explain.is_enabled())
 
 
 @app.route("/register", methods=["GET", "POST"])

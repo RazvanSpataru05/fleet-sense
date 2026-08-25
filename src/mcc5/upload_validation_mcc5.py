@@ -74,7 +74,6 @@ def _detect_delimiter(first_line: str) -> str:
 class UploadValidationError(Exception):
     """Raised with a specific, user-facing reason -- meant to be caught by the app layer
     and shown directly, not a generic failure."""
-    pass
 
 
 def _looks_like_header(first_row_tokens: list) -> bool:

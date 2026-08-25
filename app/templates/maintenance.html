@@ -2,10 +2,24 @@
 {% set active_page = "maintenance" %}
 {% block title %}Maintenance — FleetSense{% endblock %}
 
+{% macro findings(a) %}
+{% if a.issues %}
+{% for i in a.issues %}
+<span class="chip chip-{{ 'high' if i.severity == 'high' else ('low' if i.severity == 'low' else 'unknown') }}">
+  {{ location_label(i.location) }}
+</span>
+{% endfor %}
+{% elif a.verdict == 'anomaly_detected_unattributed' %}
+<span class="chip chip-unknown">Abnormal: cause not identified</span>
+{% else %}
+<span class="chip chip-ok">No issue detected</span>
+{% endif %}
+{% endmacro %}
+
 {% block content %}
 <main class="fleet-shell">
 
-  {% if not analyses %}
+  {% if not motors %}
   <section class="panel">
     <div class="panel-head">Maintenance plan</div>
     <div class="placeholder">
@@ -26,32 +40,50 @@
         </div>
       </div>
 
+      {# One row per machine. Only the newest recording carries the checkbox: planning
+      against a superseded reading is the error this grouping exists to prevent, and with
+      one row per motor the old "deselect the older one" warning has nothing left to warn
+      about. Earlier recordings stay visible underneath as context for the decision. #}
       <div class="select-list">
-        {% for a in analyses %}
-        <label class="select-row">
-          <input type="checkbox" name="include" value="{{ a.id }}" {{ 'checked' if not plan or a.id in
-            plan.entries|map(attribute='id' )|list }}>
-          <span class="select-main">
-            <span class="select-name">{{ a.motor_label }}</span>
-            <span class="select-meta">
-              {{ a.created_at.strftime('%d %b %H:%M') }} · {{ a.torque_nm }} Nm · {{ a.rpm }} rpm
+        {% for m in motors %}
+        {% set a = m.latest %}
+        <div class="select-motor {{ 'is-blocked' if m.blocked }}">
+          <label class="select-row">
+            <input type="checkbox" name="include" value="{{ a.id }}" {{ 'disabled' if m.blocked }}
+              {{ 'checked' if not m.blocked and (not plan or a.id in plan.entries|map(attribute='id' )|list) }}>
+            <span class="select-main">
+              <span class="select-name">
+                {{ m.name }}
+                {% if m.trend in ('worse', 'better') %}
+                <span class="trend trend-{{ m.trend }}">
+                  {{ '↗' if m.trend == 'worse' else '↘' }}
+                  {{ 'Worse than last check' if m.trend == 'worse' else 'Improved' }}
+                </span>
+                {% endif %}
+              </span>
+              <span class="select-meta">
+                Latest: {{ a.created_at.strftime('%d %b %H:%M') }} · {{ a.torque_nm }} Nm · {{ a.rpm }} rpm
+                {% if m.blocked %}<br><span class="select-blocked">{{ m.blocked }}</span>{% endif %}
+              </span>
             </span>
-          </span>
-          <span class="select-findings">
-            {% if a.issues %}
-            {% for i in a.issues %}
-            <span
-              class="chip chip-{{ 'high' if i.severity == 'high' else ('low' if i.severity == 'low' else 'unknown') }}">
-              {{ location_label(i.location) }}
-            </span>
+            <span class="select-findings">{{ findings(a) }}</span>
+          </label>
+
+          {% if m.count > 1 %}
+          {# <details> rather than scripted toggling -- it is keyboard accessible and works
+          before any JavaScript runs. Newest first, the same order as the motor page, so
+          reading downwards is reading backwards in time. #}
+          <details class="select-history">
+            <summary>{{ m.count - 1 }} earlier recording{{ '' if m.count == 2 else 's' }}</summary>
+            {% for h in m.history[1:] %}
+            <div class="history-row">
+              <span class="history-date">{{ h.created_at.strftime('%d %b %Y, %H:%M') }}</span>
+              <span class="history-findings">{{ findings(h) }}</span>
+            </div>
             {% endfor %}
-            {% elif a.verdict == 'anomaly_detected_unattributed' %}
-            <span class="chip chip-unknown">Abnormal: cause not identified</span>
-            {% else %}
-            <span class="chip chip-ok">No issue detected</span>
-            {% endif %}
-          </span>
-        </label>
+          </details>
+          {% endif %}
+        </div>
         {% endfor %}
       </div>
 
@@ -75,13 +107,9 @@
       </div>
     </div>
 
-    {% if plan.duplicate_labels %}
-    <div class="notice">
-      More than one recording selected for:
-      <strong>{{ plan.duplicate_labels|join(', ') }}</strong>.
-      Each is planned as separate work. If they are the same machine, deselect the older one.
-    </div>
-    {% endif %}
+    {# The duplicate-label notice that used to sit here is gone: selection is per motor and
+    only its newest recording is selectable, so one machine cannot appear twice in a plan.
+    build_plan still computes duplicate_labels, harmlessly, for any other caller. #}
 
     {% if not plan.entries %}
     <div class="placeholder">Nothing selected.</div>
@@ -214,7 +242,10 @@
   (function () {
     const all = document.getElementById("select-all");
     if (!all) return;
-    const boxes = () => document.querySelectorAll('.select-list input[type="checkbox"]');
+    // :not(:disabled) -- a blocked motor must not appear selected. Checking it in the DOM
+    // would look selected while submitting nothing, which is worse than not moving.
+    const boxes = () =>
+      document.querySelectorAll('.select-list input[type="checkbox"]:not(:disabled)');
     all.addEventListener("click", () => boxes().forEach(b => b.checked = true));
     document.getElementById("select-none")
       .addEventListener("click", () => boxes().forEach(b => b.checked = false));
