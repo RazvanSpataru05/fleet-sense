@@ -36,7 +36,8 @@ import joblib
 import numpy as np
 
 from regime_detector import detect_regime
-from envelope_dataset_mcc5 import windows_for_file_blind, detect_condition_from_data, artifacts_dir
+from envelope_dataset_mcc5 import (windows_for_file_blind, detect_condition_from_data,
+                                   artifacts_dir, display_spectrum)
 from anomaly_mcc5 import reconstruction_error, MIN_SIGNAL_RATIO
 from severity_mcc5 import diagnose_features
 from upload_validation_mcc5 import validate_upload, UploadValidationError
@@ -107,6 +108,9 @@ def check_motor(csv_path, declared_sample_rate: float = None) -> dict:
         "layer1_anomaly_ratio": round(anomaly_ratio, 3),
         "layer1_anomalous": layer1_anomalous,
         "issues": issues,
+        # Purely for display -- no layer reads it back. Kept last so the diagnostic fields
+        # stay readable when this result is printed or logged.
+        "spectrum": display_spectrum(df, condition["rpm"]),
     }
 
 

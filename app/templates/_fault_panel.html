@@ -12,20 +12,4 @@ sitting beside it. #}
     <button type="button" id="fault-panel-close" aria-label="Close details">&times;</button>
   </div>
   <div class="fault-panel-body" id="fault-panel-body"></div>
-
-  {# Rendered only when an API key is configured, the same way the S3 archive picker hides
-  itself when no bucket is set. The panel above is complete without this: the reference
-  content it draws on is on the server either way, so a deployment with no key loses the
-  question box and nothing else. #}
-  {% if explain_enabled %}
-  <form class="fault-ask" id="fault-ask">
-    <label class="fault-ask-label" for="fault-question">Ask about this finding</label>
-    <div class="fault-ask-row">
-      <input type="text" id="fault-question" maxlength="500" autocomplete="off"
-        placeholder="e.g. what usually causes this?">
-      <button type="submit" id="fault-ask-send">Ask</button>
-    </div>
-    <div class="fault-ask-answer" id="fault-ask-answer" role="status" aria-live="polite" hidden></div>
-  </form>
-  {% endif %}
 </aside>

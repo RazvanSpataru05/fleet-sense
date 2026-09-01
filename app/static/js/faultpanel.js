@@ -21,12 +21,6 @@
   const para = (text) => `<p>${esc(text)}</p>`;
   const section = (heading, html) => `<h3>${esc(heading)}</h3>${html}`;
 
-  /* What the panel is currently showing, so a question knows which finding it is about.
-     Sent to the server as identifiers only -- the reference content itself is looked up
-     server-side from the location key. */
-  let current = null;
-  let askForm, askInput, askSend, askAnswer;
-
   function init(config) {
     FAULTS = config.faults || {};
     LABELS = config.labels || {};
@@ -46,47 +40,6 @@
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && !panel.hidden) close();
     });
-
-    // Absent when no API key is configured -- the panel works unchanged without it.
-    askForm = document.getElementById("fault-ask");
-    if (!askForm) return;
-    askInput = document.getElementById("fault-question");
-    askSend = document.getElementById("fault-ask-send");
-    askAnswer = document.getElementById("fault-ask-answer");
-    askForm.addEventListener("submit", ask);
-  }
-
-  function setAnswer(text, isError) {
-    askAnswer.hidden = false;
-    askAnswer.textContent = text;
-    askAnswer.classList.toggle("is-error", !!isError);
-  }
-
-  async function ask(e) {
-    e.preventDefault();
-    const question = askInput.value.trim();
-    if (!question || !current) return;
-
-    askSend.disabled = true;
-    askInput.disabled = true;
-    setAnswer("Thinking…", false);
-
-    try {
-      const res = await fetch("/api/explain", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, ...current }),
-      });
-      // The endpoint answers with JSON on success and on failure alike, so the reason is
-      // readable rather than a status code the reader has to interpret.
-      const data = await res.json();
-      setAnswer(data.answer || data.error || "No answer was returned.", !res.ok);
-    } catch (err) {
-      setAnswer("Could not reach the server. Check your connection and try again.", true);
-    } finally {
-      askSend.disabled = false;
-      askInput.disabled = false;
-    }
   }
 
   /* context: { confidence, recorded } -- both optional. `trigger` is the element that
@@ -97,27 +50,6 @@
     context = context || {};
 
     const seen = RECURRENCE[location];
-
-    // Identifiers and observed values only. The reference content is never sent -- the
-    // server looks it up from `location`, so the answer cannot be grounded in text the
-    // page supplied.
-    current = {
-      location,
-      confidence: context.confidence != null ? Number(context.confidence) : null,
-      severity: context.severity || null,
-      recorded: context.recorded || null,
-      cost: context.cost || null,
-      motor: MOTOR_NAME,
-      recurrence: seen && TOTAL_RECORDINGS > 1
-        ? `flagged in ${seen.count} of ${TOTAL_RECORDINGS} recordings, first on ${seen.first}`
-        : null,
-    };
-    if (askForm) {
-      // A previous fault's answer must not sit under a different fault's heading.
-      askInput.value = "";
-      askAnswer.hidden = true;
-      askAnswer.textContent = "";
-    }
 
     titleEl.textContent = LABELS[location] || location;
 
@@ -153,10 +85,9 @@
     parts.push(section("What the system measured", para(f.measured)));
     parts.push(section("What to do now", para(f.action)));
 
-    // `causes`, `if_ignored` and `prevention` are deliberately not rendered. They are
-    // generic reference that made the panel long enough to stop being read, and they are
-    // still sent to the question box below as grounding -- so asking "what causes this?"
-    // is answered from the same curated text, not invented. Shorter panel, same knowledge.
+    // `causes`, `if_ignored` and `prevention` are deliberately not rendered: they are
+    // generic reference that made the panel long enough to stop being read, where
+    // everything above is specific to this machine and this reading.
 
     bodyEl.innerHTML = parts.join("");
     bodyEl.scrollTop = 0;             // reopening on a different fault should start at the top

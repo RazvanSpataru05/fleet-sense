@@ -9,10 +9,6 @@ dataset/
 # Regenerable feature caches, ~104 MB, used only for training/validation.
 **/classifier_cache/
 
-# Archived Paderborn exploration: not imported by the app, and the only thing that pulls in
-# matplotlib.
-src/paderborn/
-
 # Local development state
 .venv/
 .git/

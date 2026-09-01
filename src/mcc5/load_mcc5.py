@@ -1,8 +1,8 @@
 """
 Loader for the MCC5-THU multi-fault induction motor benchmark dataset (Chen, Liu, Li,
 Zou, He & Zhou, Data in Brief 2026). Single physical 2.2kW motor, every fault type on
-the same rig -- unlike Paderborn's per-fault-type datasets, this is what actually lets
-us build one unified detector across fault families instead of separate profiles.
+the same rig -- what lets us build one unified detector across fault families instead
+of separate profiles.
 
 Covers both splits: "speed_circulation" (constant torque, swept speed) and
 "torque_circulation" (constant speed, swept torque). Despite the names, both splits'

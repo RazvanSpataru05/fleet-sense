@@ -30,8 +30,6 @@ from schedule import build_plan  # noqa: E402
 # Layers 2 and 3 are composed here rather than inside check_motor: the diagnosis code
 # stays dataset-specific and cost-unaware, and the cost layer stays model-unaware.
 from models import db, User, Analysis  # noqa: E402
-import archive  # noqa: E402
-import explain  # noqa: E402
 from faults import FAULTS  # noqa: E402
 
 app = Flask(__name__)
@@ -245,7 +243,6 @@ def motor_detail():
 
     return render_template("motor.html", motor=motor, others=others,
                            faults=FAULTS, recurrence=recurrence,
-                           explain_enabled=explain.is_enabled(),
                            location_label=lambda k: LOCATION_LABELS.get(k, k),
                            location_labels=LOCATION_LABELS,
                            cost_band=_cost_band, issue_cost=_issue_cost)
@@ -303,43 +300,6 @@ def maintenance():
                            location_label=lambda k: LOCATION_LABELS.get(k, k))
 
 
-@app.route("/api/explain", methods=["POST"])
-@login_required
-def explain_finding():
-    """One grounded answer about one finding.
-
-    The browser posts WHICH fault it is asking about, never the reference content itself --
-    that is looked up server-side from FAULTS. A page with modified JavaScript therefore
-    cannot feed the model its own context and have the answer come back wearing this
-    system's authority.
-    """
-    payload = request.get_json(silent=True) or {}
-    fault = FAULTS.get(payload.get("location", ""))
-    if fault is None:
-        return jsonify({"error": "Unknown fault location."}), 400
-
-    try:
-        text = explain.answer(
-            fault,
-            LOCATION_LABELS.get(payload["location"], payload["location"]),
-            # Observed values for this particular finding. They come from the page, which
-            # is fine: they are the user's own analysis either way, so the worst a modified
-            # page achieves is misleading itself.
-            {"confidence": payload.get("confidence"),
-             "severity": payload.get("severity"),
-             "recorded": payload.get("recorded"),
-             "motor": payload.get("motor"),
-             "cost": payload.get("cost"),
-             "recurrence": payload.get("recurrence")},
-            payload.get("question", ""))
-    except explain.ExplainError as e:
-        # 400 with a readable reason, matching /api/analyze -- a stale key or an empty
-        # question is a request problem, and the panel shows the text as-is.
-        return jsonify({"error": str(e)}), 400
-
-    return jsonify({"answer": text})
-
-
 @app.route("/analysis/<int:analysis_id>")
 @login_required
 def view_analysis(analysis_id):
@@ -362,7 +322,6 @@ def view_analysis(analysis_id):
     return render_template("analyse.html",
                            motor_names=[m["name"] for m in _group_by_motor(analyses)],
                            location_labels=LOCATION_LABELS, faults=FAULTS,
-                           explain_enabled=explain.is_enabled(),
                            stored=analysis)
 
 
@@ -443,8 +402,7 @@ def analyse_page():
     # away afterwards.
     return render_template("analyse.html",
                            motor_names=[m["name"] for m in _group_by_motor(analyses)],
-                           location_labels=LOCATION_LABELS, faults=FAULTS,
-                           explain_enabled=explain.is_enabled())
+                           location_labels=LOCATION_LABELS, faults=FAULTS)
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -498,35 +456,13 @@ def logout():
 ALLOWED_EXTENSIONS = {".csv", ".txt"}
 
 
-@app.route("/api/recordings")
-@login_required
-def recordings():
-    """What is available in the S3 archive. Replies enabled=False rather than erroring
-    when no bucket is configured, so the UI can simply omit the picker in local
-    development instead of having to special-case a failure."""
-    if not archive.is_enabled():
-        return jsonify({"enabled": False, "recordings": []})
-    try:
-        return jsonify({"enabled": True, "recordings": archive.list_recordings()})
-    except archive.ArchiveError as e:
-        return jsonify({"enabled": True, "recordings": [], "reason": str(e)}), 502
-
-
 @app.route("/api/analyze", methods=["POST"])
 @login_required
 def analyze():
-    # Two possible sources: a browser upload, or a key into the S3 archive. The archive
-    # path skips the transfer entirely -- the object is read inside AWS rather than pushed
-    # up from the client, which for a full recording is ~1 s instead of ~5 s.
-    s3_key = request.form.get("s3_key", "").strip()
     uploaded = request.files.get("file")
-
-    if s3_key:
-        source_name = s3_key.rsplit("/", 1)[-1]
-    elif uploaded is not None and uploaded.filename:
-        source_name = uploaded.filename
-    else:
+    if uploaded is None or not uploaded.filename:
         return jsonify({"verdict": "rejected", "reason": "No file provided."}), 400
+    source_name = uploaded.filename
 
     ext = Path(source_name).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -550,15 +486,7 @@ def analyze():
     tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
     tmp.close()
     try:
-        if s3_key:
-            try:
-                archive.download_to(s3_key, tmp.name)
-            except archive.ArchiveError as e:
-                # 400, not 500: a stale key or a bad bucket is a request problem, and the
-                # message is already written to be shown to a user.
-                return jsonify({"verdict": "rejected", "reason": str(e)}), 400
-        else:
-            uploaded.save(tmp.name)
+        uploaded.save(tmp.name)
         try:
             result = check_motor(tmp.name, declared_sample_rate=declared_sample_rate)
         except Exception as e:

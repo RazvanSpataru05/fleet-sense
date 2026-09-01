@@ -11,9 +11,8 @@ envelope-spectrum band from the first pass -- the targeted features should carry
 real signal for bearing-related faults, while the wide band is kept for fault types
 that don't have a known formula yet (rotor bar, eccentricity, winding).
 
-Originally scoped to a single operating condition (20Nm, 1000rpm), for the same reason
-Paderborn was scoped to one condition -- mixing conditions dilutes the anomaly signal.
-Later extended to work across all 6 real conditions (2 torque levels x 3 RPMs) once RPM-
+Originally scoped to a single operating condition (20Nm, 1000rpm) -- mixing conditions
+dilutes the anomaly signal. Later extended to work across all 6 real conditions (2 torque levels x 3 RPMs) once RPM-
 adaptive frequency search (see FUNDAMENTAL_SEARCH_MARGIN_HZ) made that safe -- see
 classifier_mcc5.py, presence_mcc5.py, severity_mcc5.py, and anomaly_mcc5.py, which all
 extract features across every condition rather than just one.
@@ -53,8 +52,8 @@ FUNDAMENTAL_SEARCH_MARGIN_HZ = 5.0  # +/- around the nominal electrical frequenc
 # nominal every time, comfortably inside a +/-5Hz window.
 ENVELOPE_BAND = (0.0, 200.0)  # Hz, ~12x shaft frequency -- wide enough for any common bearing's BPFO/BPFI
 BIN_GROUP = 4  # average-pool this many native (2Hz) bins together -> ~8Hz effective resolution.
-# Only 359 windows exist at this single condition (no repeated files like Paderborn);
-# native resolution would give 101 bins/phase x 3 phases = 303 dims against ~287 training
+# Only 359 windows exist at this single condition; native resolution would give 101
+# bins/phase x 3 phases = 303 dims against ~287 training
 # rows, close to 1:1 and a serious overfitting risk. Pooling trades resolution for a
 # dimensionality the sample count can actually support.
 
@@ -375,3 +374,123 @@ def windows_for_file_blind(csv_path: Path, df=None) -> list:
     return windows_for_file(csv_path, torque_nm=condition["torque_nm"], rpm=condition["rpm"], df=df)
 
 
+# Bounded so the payload cannot grow with recording length: a 90 s file gives 359 windows,
+# and anything beyond this is averaged down in time rather than stored column by column.
+SPECTROGRAM_MAX_COLUMNS = 200
+SPECTROGRAM_FLOOR_DB = -60.0
+
+
+def display_spectrum(df, nominal_rpm: float, band=ENVELOPE_BAND) -> dict:
+    """The envelope spectrum behind a diagnosis, for showing rather than for modelling.
+
+    Nothing in the pipeline consumes this. It exists so the app can show what the targeted
+    features are sampled from: the same envelope spectrum, with the fault frequencies
+    computed from measured shaft speed and the bearing geometry marked on it.
+
+    Returns both views of the same per-window transform:
+
+      * the mean spectrum -- one curve, averaged over every window and phase
+      * a spectrogram -- the same data before that averaging, so time structure survives.
+        This matters for the circulation splits, where speed or torque varies during the
+        recording and the whole spectrum shifts with it; averaging hides exactly that.
+
+    Two deliberate differences from the feature path. Native 2 Hz resolution rather than
+    the BIN_GROUP-pooled ~8 Hz the classifier sees, because at that width a peak and its
+    marker fall in the same bin. And phases averaged together, where the features keep them
+    separate, because one curve is what a reader can interpret.
+
+    Magnitudes are normalised to the recording's own maximum: absolute scale depends on
+    motor current, which would make the axis meaningless across recordings.
+    """
+    shaft_hz = shaft_hz_for_file(df, nominal_rpm)
+    fault_freqs = bearing_fault_frequencies(shaft_hz)
+    slip = estimate_slip(shaft_hz, nominal_rpm)
+
+    # One row per window, averaged across the three phases as it is built.
+    per_window, freqs_kept = [], None
+    windows = {ch: window_signal(df[ch].values) for ch in CURRENT_CHANNELS}
+    n_windows = min(len(w) for w in windows.values())
+
+    for i in range(n_windows):
+        acc, used = None, 0
+        for ch in CURRENT_CHANNELS:
+            w = windows[ch][i]
+            if w.std() < 1e-9:      # same degenerate-window guard the feature path uses
+                continue
+            freqs, magnitude = compute_fft(envelope_signal(w))
+            keep = (freqs >= band[0]) & (freqs <= band[1])
+            if freqs_kept is None:
+                freqs_kept = freqs[keep]
+            acc = magnitude[keep] if acc is None else acc + magnitude[keep]
+            used += 1
+        if used:
+            per_window.append(acc / used)
+
+    if not per_window:
+        return None
+
+    matrix = np.array(per_window)                 # (windows, freq bins)
+    peak = float(matrix.max()) or 1.0
+    mean = matrix.mean(axis=0)
+    resolution = float(freqs_kept[1] - freqs_kept[0]) if len(freqs_kept) > 1 else 0.0
+
+    # location keys match LOCATION_LABELS in the app, so it can highlight the markers whose
+    # fault was actually reported and mute the rest.
+    markers = [
+        {"label": "Shaft", "hz": round(float(shaft_hz), 2), "location": None},
+        {"label": "BPFO", "hz": round(float(fault_freqs["bpfo"]), 2), "location": "bearing_outer"},
+        {"label": "BPFI", "hz": round(float(fault_freqs["bpfi"]), 2), "location": "bearing_inner"},
+        {"label": "BSF", "hz": round(float(fault_freqs["bsf"]), 2), "location": "bearing_ball"},
+        {"label": "2x shaft", "hz": round(float(static_eccentricity_frequency(shaft_hz)), 2),
+         "location": "static_eccentricity"},
+        {"label": "2sf", "hz": round(float(rotor_bar_frequency(shaft_hz, slip)), 2),
+         "location": "rotor_bar"},
+    ]
+    # Markers below one bin cannot be told apart from DC, so they are dropped rather than
+    # drawn on the axis where they would read as a rendering fault. In practice this is the
+    # rotor-bar sideband: 2sf_e depends on slip, and slip here comes from the LABELLED rpm
+    # rather than a measured speed, so it lands near zero (~0.09 Hz at 2000 rpm). The
+    # feature path samples it regardless; this only governs what is worth plotting.
+    visible = [m for m in markers
+               if band[0] <= m["hz"] <= band[1] and m["hz"] >= resolution]
+
+    return {
+        "freq_hz": [round(float(f), 1) for f in freqs_kept],
+        "magnitude": [round(float(m / peak), 4) for m in mean],
+        "resolution_hz": round(resolution, 2) if resolution else None,
+        "windows_averaged": len(per_window) * len(CURRENT_CHANNELS),
+        "markers": visible,
+        "spectrogram": _spectrogram_payload(matrix, peak),
+    }
+
+
+def _spectrogram_payload(matrix, peak: float) -> dict:
+    """Time-frequency matrix as base64 bytes rather than a JSON array of numbers.
+
+    36,000 floats would be ~250 KB of JSON text stored on every analysis row and sent to
+    the browser again on every view. Quantising dB to a byte and base64-ing the result is
+    ~48 KB for the same picture, and a spectrogram is a picture -- 256 levels is more than
+    the eye resolves in a colour ramp.
+    """
+    import base64
+
+    n_windows = matrix.shape[0]
+    if n_windows > SPECTROGRAM_MAX_COLUMNS:
+        # Average adjacent windows down rather than dropping them, so a transient is dimmed
+        # instead of disappearing entirely depending on where it fell.
+        group = int(np.ceil(n_windows / SPECTROGRAM_MAX_COLUMNS))
+        trimmed = matrix[:(n_windows // group) * group]
+        matrix = trimmed.reshape(-1, group, matrix.shape[1]).mean(axis=1)
+
+    db = 20 * np.log10(np.maximum(matrix / peak, 1e-6))
+    clipped = np.clip(db, SPECTROGRAM_FLOOR_DB, 0.0)
+    levels = ((clipped - SPECTROGRAM_FLOOR_DB) / -SPECTROGRAM_FLOOR_DB * 255).astype(np.uint8)
+
+    return {
+        "columns": int(levels.shape[0]),
+        "rows": int(levels.shape[1]),
+        "floor_db": SPECTROGRAM_FLOOR_DB,
+        "seconds": round(n_windows * STRIDE_SAMPLES / FS, 1),
+        # Row-major: one column of the image (a time slice) at a time, low frequency first.
+        "levels_b64": base64.b64encode(levels.tobytes()).decode("ascii"),
+    }

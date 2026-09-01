@@ -22,21 +22,8 @@ SQLAlchemy==2.0.52
 # not for deployment.
 gunicorn==23.0.0
 
-# MySQL driver for RDS. cryptography is required for MySQL 8's default
-# caching_sha2_password auth; without it the connection fails with an auth-plugin error.
+# MySQL driver, used when DATABASE_URL points at MySQL rather than the default SQLite.
+# cryptography is required for MySQL 8's default caching_sha2_password auth; without it
+# the connection fails with an auth-plugin error.
 PyMySQL==1.1.1
 cryptography==46.0.3
-
-# Deliberately absent: matplotlib. It is 33 MB and is only imported by src/paderborn,
-# which is archived exploratory work and is excluded from the image entirely.
-
-# S3 access for the recording archive. Pinned for reproducible builds, but unlike the ML
-# stack above this one is safe to bump freely -- those pins exist because the trained
-# models must be unpickled by the exact versions that produced them, which has nothing to
-# do with an AWS SDK.
-boto3==1.43.78
-
-# Claude API, for the grounded question box in the fault detail panel. Same reasoning as
-# boto3 above: pinned for reproducible builds, but safe to bump freely -- it has nothing to
-# do with the trained models.
-anthropic==1.0.0

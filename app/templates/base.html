@@ -5,6 +5,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}FleetSense{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/favicon-32.png') }}">
+  <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='img/favicon-16.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <script>
     // Runs before first paint: applies a previously chosen theme so the page never
@@ -26,6 +30,16 @@
 
   <header class="masthead">
     <div class="masthead-inner">
+      <svg class="brand-mark" viewBox="-121 -106 242 212" aria-hidden="true">
+        <path d="M -105 0 c 44.56 -37.33 60.44 -37.33 105 0 c 44.56 37.33 60.44 37.33 105 0"
+          transform="translate(0 -62)" fill="none" stroke="#16C9C9" stroke-width="20" stroke-linecap="round"
+          opacity="0.5" />
+        <path d="M -105 0 c 44.56 -37.33 60.44 -37.33 105 0 c 44.56 37.33 60.44 37.33 105 0"
+          fill="none" stroke="#16C9C9" stroke-width="20" stroke-linecap="round" />
+        <path d="M -105 0 c 44.56 -37.33 60.44 -37.33 105 0 c 44.56 37.33 60.44 37.33 105 0"
+          transform="translate(0 62)" fill="none" stroke="#16C9C9" stroke-width="20" stroke-linecap="round"
+          opacity="0.5" />
+      </svg>
       <div class="wordmark">Fleet<span>Sense</span></div>
       <div class="masthead-sub">Motor Current Signature Analysis</div>
 
