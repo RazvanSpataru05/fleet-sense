@@ -14,13 +14,25 @@ A mechanical fault disturbs the load the motor has to turn, and the motor answer
 
 Every feature is computed from the envelope of the three phase currents (Hilbert transform, then FFT), because a fault modulates the amplitude of the current rather than its base frequency. The recording is cut into 0.5s windows and each one becomes a vector of 104 features: the envelope spectrum, statistical shape (RMS, peak, kurtosis), and targeted magnitudes at frequencies computed from the bearing geometry and the measured shaft speed.
 
+![Envelope spectrum with bearing fault frequencies marked](media/images/spectrogram.png)
+
+*The envelope spectrum behind one diagnosis. Every dashed line is a frequency derived from the SKF 6205 bearing geometry and the shaft speed measured from the current itself, not read off a label. BPFI is highlighted because that is the location this recording was flagged for.*
+
 From there the pipeline runs in three layers:
 
 **Layer 1: Is anything wrong?** An autoencoder squeezes those 104 features down to 8 and rebuilds them. It is trained only on healthy recordings and never sees a single fault, so a healthy motor rebuilds cleanly and anything else does not. This is what lets it flag a fault type nobody ever labelled. Validated leave-one-condition-out with zero false alarms and 72% of real faults caught.
 
 **Layer 2: What is wrong?** A multi-label random forest scores nine physical locations independently, so a motor can be flagged for two faults at once, which happens often in the real dataset. Bearing faults additionally get a severity call (high or low) from a dedicated per-location classifier.
 
+![3D motor view with the rotor bars and bearing races flagged](media/images/motor_view.png)
+
+*Every finding is placed on the part it belongs to and coloured by severity. This motor came back with two faults at once: broken rotor bars in orange, and the bearing inner races in yellow at both ends. The analysis cannot tell which end a bearing fault sits on, so both are flagged rather than implying it knows.*
+
 **Layer 3: What do I do about it?** Findings are priced against real Romanian market rates, deduplicated (three bearing detections are one physical bearing, so one job), and split across budget lines because supply-side electrical work is not a motor repair. Feed it a budget and it ranks the fleet and tells you what fits and what gets deferred.
+
+![Maintenance plan ranked against a budget](media/images/maintenance_plan.png)
+
+*Ranking is a transparent scoring rule, not a model, so every position can be explained to the engineer who has to act on it. Work is committed against the worst case of each cost band, and a job that does not fit is skipped rather than stopping the plan, so cheaper work further down still gets scheduled.*
 
 Both models exist twice, once per control regime (constant torque or constant speed). A regime detector reads the torque channel's variability and picks the right pair before anything else runs.
 
@@ -132,13 +144,3 @@ You can upload any recording from the dataset, or your own, as long as it meets 
 * **Length:** at least 60 seconds. Anything under about 90 seconds still works but broken rotor bar detection is flagged as reduced confidence, because its target frequency needs close to the full recording to resolve.
 
 Files that fail these checks are rejected with a specific reason rather than analysed anyway.
-
-## Limitations
-
-Worth being upfront about, since a diagnosis you cannot trust is worse than none:
-
-* **No failure dates.** Predicting time to failure would need run-to-failure recordings, which this dataset does not contain. The app reports direction (worse than last check) and refuses to invent a date;
-* **Bent shaft is invisible.** It scored zero on every metric, because a bent shaft leaves no trace in the current at all. It is a vibration-domain fault and current-based monitoring genuinely cannot see it;
-* **Bearing detection is the weakest area.** A bearing fault reaches the current indirectly, through load modulation, so the signal arrives much weaker than an electrical fault like voltage unbalance (which scores a perfect 1.00);
-* **Winding faults and supply imbalance look alike.** Both raise the same negative-sequence signature, so the app can tell you the supply is unbalanced but not always whether the cause is the winding or the switchboard;
-* **Operating conditions are fixed to the training grid.** Condition detection snaps to the nearest known combination of 20 or 40 Nm and 1000, 2000 or 3000 RPM. A motor running well outside that grid would be silently mapped to the closest one.
