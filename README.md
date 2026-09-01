@@ -6,13 +6,7 @@ Built as my final project for the **Siemens Software Summer School 2026**.
 
 ## Preview
 
-![fleetsense_preview](PASTE_GIF_URL_HERE)
-
-### Screenshots
-
-| Fleet | Analysis | Maintenance Plan |
-|-------|----------|------------------|
-| <img src="PASTE_URL_HERE" width="250"/> | <img src="PASTE_URL_HERE" width="250"/> | <img src="PASTE_URL_HERE" width="250"/> |
+![FleetSense preview](media/fleetsense_preview.gif)
 
 ## How It Works
 
