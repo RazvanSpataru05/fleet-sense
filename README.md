@@ -1,8 +1,6 @@
 # FleetSense
 
-A predictive maintenance web app that diagnoses faults in three-phase induction motors using nothing but the current the motor already draws. No vibration sensors, no extra hardware. Upload a current recording and it tells you whether something is wrong, which part of the motor it is, what the repair costs and when to schedule it.
-
-Built as my final project for the **Siemens Software Summer School 2026**.
+A predictive maintenance web app that diagnoses faults in three-phase induction motors using nothing but the current the motor already draws. Upload a current recording and it tells you whether something is wrong, which part of the motor it is and an estimation of the repair costs.
 
 ## Preview
 
@@ -20,27 +18,25 @@ Every feature is computed from the envelope of the three phase currents (Hilbert
 
 From there the pipeline runs in three layers:
 
-**Layer 1: Is anything wrong?** An autoencoder squeezes those 104 features down to 8 and rebuilds them. It is trained only on healthy recordings and never sees a single fault, so a healthy motor rebuilds cleanly and anything else does not. This is what lets it flag a fault type nobody ever labelled. Validated leave-one-condition-out with zero false alarms and 72% of real faults caught.
+**Layer 1: Is anything wrong?** An autoencoder squeezes those 104 features down to 8 and rebuilds them. It is trained only on healthy recordings and never sees a single fault, so a healthy motor rebuilds cleanly and anything else does not. This is what lets it flag a fault type nobody ever labeled. Validated leave-one-condition-out with zero false alarms and 72% of real faults caught.
 
-**Layer 2: What is wrong?** A multi-label random forest scores nine physical locations independently, so a motor can be flagged for two faults at once, which happens often in the real dataset. Bearing faults additionally get a severity call (high or low) from a dedicated per-location classifier.
+**Layer 2: What is wrong?** A multi-label random forest scores nine physical locations independently, so a motor can be flagged for two faults at once, which happens often in the real dataset. Bearing faults additionally get a severity call from a dedicated per-location classifier.
 
 ![3D motor view with the rotor bars and bearing races flagged](media/images/motor_view.png)
 
-*Every finding is placed on the part it belongs to and coloured by severity. This motor came back with two faults at once: broken rotor bars in orange, and the bearing inner races in yellow at both ends. The analysis cannot tell which end a bearing fault sits on, so both are flagged rather than implying it knows.*
+*Every finding is placed on the part it belongs to and colored by severity. This motor came back with two faults at once: broken rotor bars in orange, and the bearing inner races in yellow at both ends. The analysis cannot tell which end a bearing fault sits on, so both are flagged rather than implying it knows.*
 
-**Layer 3: What do I do about it?** Findings are priced against real Romanian market rates, deduplicated (three bearing detections are one physical bearing, so one job), and split across budget lines because supply-side electrical work is not a motor repair. Feed it a budget and it ranks the fleet and tells you what fits and what gets deferred.
+**Layer 3: What do I do about it?** Findings are priced against real Romanian market rates, deduplicated, and split across budget lines because supply-side electrical work is not a motor repair. Feed it a budget and it ranks the fleet and tells you what fits in the maintenance plan and what gets deferred.
 
 ![Maintenance plan ranked against a budget](media/images/maintenance_plan.png)
 
 *Ranking is a transparent scoring rule, not a model, so every position can be explained to the engineer who has to act on it. Work is committed against the worst case of each cost band, and a job that does not fit is skipped rather than stopping the plan, so cheaper work further down still gets scheduled.*
 
-Both models exist twice, once per control regime (constant torque or constant speed). A regime detector reads the torque channel's variability and picks the right pair before anything else runs.
-
 ## Key Features
 
 * Fault diagnosis from current alone, across nine motor locations: bearing outer race, inner race and rolling elements, broken rotor bar, static and dynamic eccentricity, stator winding, supply voltage unbalance and bent shaft;
 * Anomaly detection trained purely on healthy data, so it can flag faults it was never taught;
-* Interactive 3D motor viewer where every finding is placed on the actual part, colour-coded by severity, so you see where the fault is rather than reading a term you may not know;
+* Interactive 3D motor viewer where every finding is placed on the actual part, color-coded by severity, so you see where the fault is rather than reading a term you may not know;
 * Envelope spectrum and spectrogram for every analysis, with the fault frequencies marked, so you can check the diagnosis against the signal it came from;
 * Repair cost estimation with sourced price bands, job deduplication and separate budget lines for motor work and switchboard work;
 * Maintenance scheduler that ranks machines by severity, confidence and cost leverage, then fits them against a budget you set;
@@ -58,7 +54,7 @@ Both models exist twice, once per control regime (constant torque or constant sp
 
 ## Dataset
 
-This project uses the **MCC5-THU Motor Benchmark Dataset**, recorded on a single 2.2 kW three-phase asynchronous motor with an SKF 6205-2Z/C3 bearing. It covers 24 fault types (including compound faults) across 6 operating conditions, in two control regimes.
+This project uses the **MCC5-THU Motor Benchmark Dataset**, recorded on a single 2.2 kW three-phase asynchronous motor with an SKF 6205-2Z/C3 bearing. It covers 24 fault types (including compound faults) across 6 operating conditions, in two control regimes: constant speed and constant torque.
 
 Download it from the [official repository](https://github.com/liuzy0708/MCC5-THU-Motor-Benchmark-Datasets). It is also mirrored on Mendeley Data, IEEE DataPort and Hugging Face.
 
@@ -144,3 +140,7 @@ You can upload any recording from the dataset, or your own, as long as it meets 
 * **Length:** at least 60 seconds. Anything under about 90 seconds still works but broken rotor bar detection is flagged as reduced confidence, because its target frequency needs close to the full recording to resolve.
 
 Files that fail these checks are rejected with a specific reason rather than analysed anyway.
+
+## Project Background
+
+This application was developed by [Spătaru Răzvan-Gabriel](https://github.com/RazvanSpataru05) as the final project for **Siemens Software Summer School 2026**.
