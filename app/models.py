@@ -5,11 +5,6 @@ The product model is a plant manager with an account for their own site, uploadi
 recordings for the motors they are responsible for. So analyses belong to a user, and the
 fleet view is "the motors this account has analysed".
 
-Portability note: every String column carries an explicit length. SQLite ignores lengths,
-but MySQL refuses to create an indexed VARCHAR without one -- declaring them here means the
-same models run unchanged on local SQLite and on RDS MySQL, selected purely by
-DATABASE_URL. The JSON column maps to native JSON on MySQL 5.7+ and to text on SQLite,
-handled transparently by SQLAlchemy.
 """
 from datetime import datetime, timezone
 
@@ -55,7 +50,6 @@ class Analysis(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=_utcnow, index=True)
 
-    # What the user calls this machine, e.g. "Line 3 feed pump". Defaults to the filename.
     motor_label = db.Column(db.String(120), nullable=False)
     filename = db.Column(db.String(255), nullable=False)
 
@@ -66,7 +60,6 @@ class Analysis(db.Model):
     layer1_anomalous = db.Column(db.Boolean, nullable=True)
     layer1_anomaly_ratio = db.Column(db.Float, nullable=True)
 
-    # Full check_motor() output plus the cost estimate, exactly as returned to the browser.
     result = db.Column(db.JSON, nullable=False)
 
     user = db.relationship("User", back_populates="analyses")
@@ -93,7 +86,7 @@ class Analysis(db.Model):
 
     @property
     def worst_severity(self) -> str:
-        """high > low > unknown > none -- used for fleet ordering and colour.
+        """high > low > unknown > none. Used for fleet ordering and colour.
 
         'none' means genuinely nothing found. A recording where Layer 1 flagged an
         anomaly that Layer 2 could not localise is NOT healthy, so it grades as

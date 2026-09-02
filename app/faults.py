@@ -13,8 +13,7 @@ Two kinds of content live here and they have different standing:
 
 The system reads three phase currents and nothing else. Every feature is computed from the
 envelope (Hilbert magnitude) spectrum of those currents, so a fault is visible here only if
-it modulates the current. A purely mechanical fault is invisible however severe -- see
-`bend`, which validated at zero on every metric.
+it modulates the current. A purely mechanical fault is invisible however severe.
 
 Reliability figures are precision/recall/F1 at the tuned presence threshold of 0.3. That
 threshold was lowered from 0.5 deliberately, to catch faults rather than avoid false
