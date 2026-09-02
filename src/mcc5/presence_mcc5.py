@@ -2,25 +2,17 @@
 Layer 2, stage 1: per-location fault presence, reframed as multi-label rather than 24-way
 exact-match classification.
 
-Why multi-label: the strict 24-class classifier (classifier_mcc5.py) tops out at 24%
-exact-match accuracy, but most of its "wrong" answers turn out to be adjacent, not random
--- confusing severity levels (bearing_outer_H vs bearing_outer_L) or missing one fault in a
-two-fault combo file. Neither of those is actually a wrong answer for the real use case: a
-dashboard that lights up affected physical locations independently of each other, and
-independently of severity. Reframing to "which of these 9 locations are affected" (each
-scored on its own, any combination allowed) both matches that use case directly and scores
-far better once severity/combo details stop being counted as errors: ~53% family-level
-accuracy on the strict classifier, and per-location F1 of 50-100% for 5 of 9 locations here.
+Why multi-label: the strict 24-class classifier tops out at 24%
+exact-match accuracy, but most of its "wrong" answers turn out to be adjacent, not random,
+confusing severity levels or missing one fault in a two-fault combo file.
+Neither of those is actually a wrong answer for the real use case: a dashboard
+that lights up affected physical locations independently of each other, and
+independently of severity. Reframing to "which of these 9 locations are affected"
+both matches that use case directly and scores far better once severity/combo details
+stop being counted as errors: ~53% family-level accuracy on the strict classifier,
+and per-location F1 of 50-100% for 5 of 9 locations here.
 
-9 locations, derived from the 24 fault-type names by stripping severity suffixes (_H/_L)
-and splitting "_and_" combos into their components:
-  bearing_ball, bearing_inner, bearing_outer, bend, rotor_bar (broken_bar),
-  dynamic_eccentricity, static_eccentricity, voltage_unbalance, winding
-
-Validated leave-one-condition-out, file-level (mean predicted probability across all of a
-held-out file's windows, thresholded at 0.3 -- tuned down from the default 0.5 because the
-default was too conservative: it missed real faults far more than it avoided false alarms,
-confirmed by scanning thresholds 0.2-0.5 directly). Result, per location (precision/recall/F1):
+Validated leave-one-condition-out, file-level. Result, per location (precision/recall/F1):
   static_eccentricity  0.77 / 0.83 / 0.80
   voltage_unbalance    1.00 / 1.00 / 1.00
   rotor_bar            0.54 / 0.83 / 0.65
@@ -29,8 +21,7 @@ confirmed by scanning thresholds 0.2-0.5 directly). Result, per location (precis
   winding              0.63 / 0.21 / 0.31
   bearing_ball         0.16 / 0.42 / 0.23
   dynamic_eccentricity 0.25 / 0.11 / 0.15
-  bend                 0.00 / 0.00 / 0.00  -- confirmed elsewhere to have no current-domain
-                                              signature at all (only visible in vibration)
+  bend                 0.00 / 0.00 / 0.00  
 """
 import numpy as np
 import joblib
@@ -46,7 +37,7 @@ LOCATIONS = [
     "dynamic_eccentricity", "static_eccentricity", "voltage_unbalance", "winding",
 ]
 
-PRESENCE_THRESHOLD = 0.3  # tuned down from the RF default of 0.5 -- see module docstring
+PRESENCE_THRESHOLD = 0.3 
 
 SPLITS = ("torque_circulation", "speed_circulation")
 
@@ -56,9 +47,10 @@ def model_path(split: str):
 
 
 def fault_set(name: str) -> set:
-    """Which of the 9 LOCATIONS a given 24-class fault name touches. Handles the one combo
-    whose second component drops the "bearing_" prefix (bearing_outer_H_and_inner_H) as a
-    special case; every other combo already spells "bearing_" out in full."""
+    """Which of the 9 locations a given 24-class fault name touches. Handles the one combo
+    whose second component drops the "bearing_" prefix as a
+    special case; every other combo already spells "bearing_" out in full.
+    """
     if name == "health":
         return set()
     if name == "bearing_outer_H_and_inner_H":
@@ -89,10 +81,11 @@ def _new_classifier() -> RandomForestClassifier:
 
 
 def validate_leave_one_condition_out(X, Y, torque_nm, rpm, y_names):
-    """Same validation style as classifier_mcc5.py: hold out one (torque, rpm) condition at
-    a time (all classes at once), aggregate a mean per-location probability across each held-
-    out file's own windows, then threshold. Returns file-level (true, predicted) label
-    matrices and the fault name for each row, for external reporting."""
+    """Same validation style as classifier_mcc5.py: hold out one condition at
+    a time, aggregate a mean per-location probability across each held-
+    out file's own windows, then threshold. Returns file-level label
+    matrices and the fault name for each row, for external reporting.
+    """
     file_true, file_pred_probs, file_names = [], [], []
     for test_t, test_r in CONDITIONS:
         test_mask = (torque_nm == test_t) & (rpm == test_r)
@@ -100,7 +93,7 @@ def validate_leave_one_condition_out(X, Y, torque_nm, rpm, y_names):
 
         clf = _new_classifier()
         clf.fit(X[train_mask], Y[train_mask])
-        probs = clf.predict_proba(X[test_mask])  # list of (n,2) arrays, one per location
+        probs = clf.predict_proba(X[test_mask])  
 
         y_test_names = y_names[test_mask]
         for fault in sorted(set(y_test_names)):
@@ -125,23 +118,19 @@ def report(file_true, file_pred_probs, threshold=PRESENCE_THRESHOLD):
 
 
 def train_final_model(X, Y, split: str):
-    """Trained on ALL available data (no holdout) -- this is the deployable model, distinct
+    """Trained on ALL available data. This is the deployable model, distinct
     from the leave-one-condition-out validation above which exists to report honest
-    generalization numbers, not to produce the artifact actually used for inference."""
+    generalization numbers, not to produce the artifact actually used for inference.
+    """
     clf = _new_classifier()
     clf.fit(X, Y)
-    # compress=3: a multi-output RandomForest stores a (n_outputs, n_classes) float64
-    # array at every node of every tree, which is hugely repetitive -- zlib takes these
-    # from ~250-390MB down to ~40-60MB. Lossless: verified predictions bit-identical
-    # before and after. Load time is unaffected (less disk I/O offsets the inflate).
     joblib.dump({"model": clf, "locations": LOCATIONS, "threshold": PRESENCE_THRESHOLD},
                 model_path(split), compress=3)
     return clf
 
 
 def predict_presence(model, X) -> dict:
-    """Mean presence probability per location across a set of windows (e.g. all windows
-    from one uploaded file)."""
+    """Mean presence probability per location across a set of windows."""
     probs = model.predict_proba(X)
     return {
         loc: float(probs[j][:, 1].mean()) if probs[j].shape[1] > 1 else 0.0

@@ -1,45 +1,27 @@
 """
-Layer 2, stage 2: bearing fault severity (high vs low), for the three bearing locations
-where the dataset actually has both severity levels recorded (bearing_outer, bearing_inner,
-bearing_ball). Deliberately NOT attempted for the other 6 locations:
+Layer 2, stage 2: bearing fault severity, for the three bearing locations
+where the dataset actually has both severity levels recorded.
+Not attempted for the other 6 locations.
 
-  - bend, rotor_bar (broken_bar), dynamic_eccentricity, voltage_unbalance: the dataset only
-    ever recorded ONE severity level for these. There's no H/L pair to learn a distinction
-    from -- a data limitation, not something more modeling effort can fix.
-  - static_eccentricity, winding: DO have H/L labels, but a dedicated severity classifier
-    (same approach as below) tested at 50% and 58% leave-one-condition-out accuracy --
-    chance level. Reusing the presence-detection probability as a severity proxy tested even
-    worse (confirmed empirically: it doesn't consistently track true severity direction at
-    all for these two, sometimes scoring L higher than H). No severity call is made for
-    these; they surface as presence-only.
+Each bearing location gets its own binary classifier, trained only on that
+location's own PURE single-fault files, not the 4 combo files each of bearing_outer/bearing_inner
+also appears in, since a combo's severity signature for that location hasn't been tested and might differ
+from a pure single fault's.
 
-Each bearing location gets its own binary classifier (H vs L), trained only on that
-location's own PURE single-fault files (bearing_outer_H/L, etc.) -- not the 4 combo files
-each of bearing_outer/bearing_inner also appears in (e.g. "winding_H_and_bearing_outer_H"),
-since a combo's severity signature for that location hasn't been tested and might differ
-from a pure single fault's. Those combo files could plausibly be added later as extra
-"H" training examples (they're always the H variant in this dataset) to shore up bearing_
-outer/bearing_inner's small sample size -- noted here as a real option, not implemented,
-since it's untested and bearing_ball has no combo files to match it with anyway.
-
-Validated leave-one-condition-out (n=12 files per location: 6 conditions x 2 severities):
+Validated leave-one-condition-out:
   bearing_ball    83% file-level accuracy
   bearing_inner   83%
   bearing_outer   75%
-A real, consistent pattern across all three bearing locations -- not one lucky number --
-but still a small sample, so the exact percentage carries real uncertainty.
 
-Provides diagnose_file(), the full two-stage inference entrypoint meant to be reusable
-directly by a future web app: given an uploaded recording, run presence detection first,
-then severity for any bearing location that comes back present, and return a plain list of
-detected issues.
+A real, consistent pattern across all three bearing locations: not one lucky number
+but still a small sample, so the exact percentage carries real uncertainty.
 """
 import numpy as np
 import joblib
 
 from sklearn.ensemble import RandomForestClassifier
 
-from envelope_dataset_mcc5 import windows_for_file_blind, artifacts_dir
+from envelope_dataset_mcc5 import artifacts_dir
 from classifier_mcc5 import build_dataset, CONDITIONS
 from presence_mcc5 import SPLITS, PRESENCE_THRESHOLD, model_path as presence_model_path, predict_presence
 
@@ -90,7 +72,7 @@ def validate_severity(X, y, torque_nm, rpm):
 
 
 def train_final_models(X, y, torque_nm, rpm, split: str):
-    """Trained on ALL available pure H/L files per location (no holdout) -- these are the
+    """Trained on all available pure H/L files per location. These are the
     deployable models; validate_severity() above exists only to report honest generalization
     numbers separately."""
     models = {}
@@ -99,16 +81,16 @@ def train_final_models(X, y, torque_nm, rpm, split: str):
         clf = _new_classifier()
         clf.fit(Xs, ys)
         models[location] = clf
-    joblib.dump(models, severity_model_path(split), compress=3)  # lossless -- see presence_mcc5
+    joblib.dump(models, severity_model_path(split), compress=3) 
     return models
 
 
 def diagnose_features(X, split: str, presence_model=None, severity_models=None) -> list:
-    """Core Layer 2 logic given an already-extracted feature matrix -- split out from
-    diagnose_file() so an orchestrator that also needs X for Layer 1 (see pipeline_mcc5.py)
-    doesn't have to extract features twice for the same file. Returns a plain list of
-    detected-issue dicts (empty if nothing crosses the presence threshold) -- no "healthy"
-    sentinel here, that framing is the caller's job (it depends on what Layer 1 says too)."""
+    """Core Layer 2 logic given an already-extracted feature matrix, so an orchestrator
+    that also needs X for Layer 1 (see pipeline_mcc5.py) does not extract features twice
+    for the same file. Returns a plain list of detected-issue dicts, empty if nothing
+    crosses the presence threshold -- no "healthy" sentinel, since that framing depends on
+    what Layer 1 says too."""
     if presence_model is None:
         presence_model = joblib.load(presence_model_path(split))["model"]
     if severity_models is None:
@@ -130,19 +112,6 @@ def diagnose_features(X, split: str, presence_model=None, severity_models=None) 
         issues.append(issue)
 
     return issues
-
-
-def diagnose_file(csv_path, split: str, presence_model=None, severity_models=None):
-    """Standalone Layer-2-only entrypoint: extract features from one uploaded recording
-    (windows_for_file_blind -- no filename metadata trusted, torque/RPM auto-detected from
-    the recording's own data) and run diagnose_features() on them. Kept for direct/manual
-    use; pipeline_mcc5.check_motor() is the real full Layer 1 -> Layer 2 entrypoint and
-    calls diagnose_features() itself to avoid extracting features twice."""
-    rows = windows_for_file_blind(csv_path)
-    X = np.array(rows)
-    issues = diagnose_features(X, split, presence_model, severity_models)
-    return issues if issues else [{"location": "none", "presence_confidence": None, "severity": "healthy"}]
-
 
 def main():
     for split in SPLITS:

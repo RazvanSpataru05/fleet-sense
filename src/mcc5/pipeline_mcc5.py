@@ -1,36 +1,32 @@
 """
-The real Layer 1 -> Layer 2 entrypoint: check_motor(csv_path) is what a real deployment
-(or the eventual web app) would actually call for one uploaded recording. Chains:
+The real Layer 1 to Layer 2 entrypoint: check_motor is what a real deployment
+would actually call for one uploaded recording. Chains:
 
-  1. Regime detection -- which control regime this file is running under, which selects
-     which pair of models (Layer 1 + Layer 2) to use. Refuses to proceed if ambiguous
-     rather than guessing (see regime_detector.py).
-  2. Layer 1 anomaly scoring -- is this file's overall signature elevated relative to a
+  1. Regime detection: Which control regime this file is running under, which selects
+     which pair of models to use. Refuses to proceed if ambiguous rather than guessing.
+
+  2. Layer 1 anomaly scoring: is this file's overall signature elevated relative to a
      healthy baseline at its own auto-detected operating condition.
-  3. Layer 2 diagnosis -- which specific location(s), and severity where assessable
-     (bearing outer/inner/ball only -- see severity_mcc5.py for why).
 
-Design decision on how Layer 1 and Layer 2 combine: Layer 2 is NOT hard-gated behind a
-confident Layer 1 anomaly call. Layer 1 only catches ~72-73% of real faults (see
-anomaly_mcc5.py's own validated numbers) -- a hard gate ("only run Layer 2 if Layer 1 says
-anomalous") would silently downgrade the other ~27-28% to "no issue detected", discarding
+  3. Layer 2 diagnosis: Which specific location(s), and severity were assessable.
+
+Design decision on how Layer 1 and Layer 2 combine: Layer 2 is NOT locked behind a
+confident Layer 1 anomaly call. Layer 1 only catches ~72-73% of real faults a hard gate
+would silently downgrade the other ~27-28% to "no issue detected", discarding
 exactly the cases where Layer 2's more targeted per-location classifiers might still catch
 something Layer 1's single aggregate reconstruction-error score misses. Both layers always
-run instead (Layer 2 is cheap -- a handful of RandomForest predictions on features already
-extracted for Layer 1), and the report combines both signals rather than dropping one:
+run instead, and the report combines both signals rather than dropping one:
 
-  - Layer 2 finds >=1 location  -> report it/them, annotated with whether Layer 1
-    independently agrees this file is anomalous overall (a cross-check, not a requirement)
-  - Layer 2 finds nothing, but Layer 1 flags anomaly -> "anomaly detected, no specific
-    cause identified" -- the honest state for known blind-spot faults (bend,
-    dynamic_eccentricity have no learned location signature at all) or a genuinely novel
-    fault Layer 2 was never trained to recognize
-  - Neither flags anything -> "no issue detected"
+  - Layer 2 finds >=1 location: report it/them, annotated with whether Layer 1
+    independently agrees this file is anomalous overall;
+  - Layer 2 finds nothing, but Layer 1 flags anomaly: "anomaly detected, no specific
+    cause identified". The honest state for known blind-spot faults or a genuinely novel
+    fault Layer 2 was never trained to recognize;
+  - Neither flags anything: "no issue detected"
 
-Runs upload_validation_mcc5.validate_upload() first -- the model is never handed a file
-that hasn't passed those checks (column shape, sample rate, minimum length). A rejected
-file returns verdict="rejected" with the specific reason, not an exception the caller has
-to know to catch.
+Runs upload_validation_mcc5.validate_upload() first. The model is never handed a file
+that hasn't passed those checks. A rejected file returns verdict="rejected"
+with the specific reason, not an exception the caller has to know to catch.
 """
 import joblib
 import numpy as np
@@ -65,7 +61,6 @@ def check_motor(csv_path, declared_sample_rate: float = None) -> dict:
     rows = windows_for_file_blind(csv_path, df=df)
     X = np.array(rows)
 
-    # --- Layer 1: overall anomaly check, against this file's own auto-detected condition ---
     out_dir = artifacts_dir(split)
     anomaly_model = joblib.load(out_dir / "anomaly_model_multi_condition.pkl")
     anomaly_scaler = joblib.load(out_dir / "anomaly_scaler_multi_condition.pkl")
@@ -77,7 +72,6 @@ def check_motor(csv_path, declared_sample_rate: float = None) -> dict:
     anomaly_ratio = float(file_error / healthy_baseline)
     layer1_anomalous = anomaly_ratio >= MIN_SIGNAL_RATIO
 
-    # --- Layer 2: per-location diagnosis, reusing the same X (no re-extraction) ---
     issues = diagnose_features(X, split)
 
     if validation["reduced_confidence_rotor_bar"]:
@@ -108,8 +102,6 @@ def check_motor(csv_path, declared_sample_rate: float = None) -> dict:
         "layer1_anomaly_ratio": round(anomaly_ratio, 3),
         "layer1_anomalous": layer1_anomalous,
         "issues": issues,
-        # Purely for display -- no layer reads it back. Kept last so the diagnostic fields
-        # stay readable when this result is printed or logged.
         "spectrum": display_spectrum(df, condition["rpm"]),
     }
 

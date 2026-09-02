@@ -1,27 +1,17 @@
 """
-Layer 1, extended across all 6 real operating conditions per split (previously scoped to
-just one condition, 20Nm/1000rpm). Without this, a perfectly healthy motor running at any
+Layer 1, extended across all 6 real operating conditions per split.
+Without this, a perfectly healthy motor running at any
 other speed/load would likely get falsely flagged as anomalous by the old model, simply
-because it never saw a healthy baseline for that condition -- not because anything is
-actually wrong. Same fix already applied to Layer 2's classifiers.
+because it never saw a healthy baseline for that condition.
 
-Reuses classifier_mcc5.py's cached multi-condition feature dataset (all 24 fault types x
-6 conditions, extracted once per split) -- Layer 1 only needs the "health" rows out of it,
+Reuses classifier_mcc5.py's cached multi-condition feature dataset. Layer 1 only needs the "health" rows out of it,
 but sharing the extraction pass means Layer 1 and Layer 2 never diverge on what a feature
 vector even is.
 
-Trained per split -- never mixing speed_circulation and torque_circulation (confirmed
-early in this project that healthy files score systematically differently by split alone).
-Condition (torque_nm, rpm) stays in the feature vector as an explicit input, same principle
-as Layer 2, so the model can learn condition-specific normal patterns instead of being
-confused by them.
-
 Validated leave-one-condition-out, but structured to avoid a circular false-positive check:
 for each of the 6 conditions, the autoencoder is trained ONLY on healthy windows from the
-other 5 -- the held-out condition's own healthy file is chronologically split (80/20, same
-scheme the original single-condition model used) into a "baseline" portion (establishes
-that condition's expected healthy error level) and a "val" portion (genuinely unseen,
-checks the model doesn't cry wolf on real healthy data). Fault files at the held-out
+other 5. The held-out condition's own healthy file is chronologically split into a "baseline" portion 
+and a "val" portion. Fault files at the held-out
 condition are then scored against that same baseline to check they're actually caught.
 """
 import numpy as np
@@ -38,20 +28,10 @@ from classifier_mcc5 import build_dataset, CONDITIONS
 SPLITS = ("torque_circulation", "speed_circulation")
 
 HIDDEN_LAYERS = (32, 8, 32)
-ALPHA = 0.01  # same regularization as the original single-condition model. There's ~6x
-# more healthy training data now, which could likely support relaxing this, but that's an
-# untested second variable on top of the actual fix -- left alone unless validation below
-# shows a real capacity problem.
+ALPHA = 0.01 # regularization parameter
 
-MIN_SIGNAL_RATIO = 1.2  # NOT the 1.5 used throughout Layer 2 -- that was inherited without
-# checking it fit Layer 1's OWN error distribution, which turned out to be a real mistake:
-# scanning thresholds against file-level healthy-vs-fault ratios directly (both splits)
-# showed 1.5 was needlessly conservative (52.9%/53.3% fault detection) while 1.1-1.2 gets
-# zero false positives on every held-out healthy file in both splits AND ~72-73% detection.
-# 1.2 (not 1.1) because speed_circulation still had 2/6 false positives at 1.1 -- 1.2 is the
-# lowest shared threshold that's clean for both splits, not fit separately per split (n=6
-# healthy files per split is too small to trust a split-specific optimum).
-VAL_SIZE = 0.2  # chronological split within the held-out condition's own healthy file
+MIN_SIGNAL_RATIO = 1.2 
+VAL_SIZE = 0.2 
 
 
 def reconstruction_error(model, X) -> np.ndarray:
@@ -84,16 +64,13 @@ def validate_leave_one_condition_out(split: str):
 
     for test_t, test_r in CONDITIONS:
         cond_mask = (torque_nm == test_t) & (rpm == test_r)
-        train_mask = healthy_mask & ~cond_mask  # healthy windows from the OTHER 5 conditions only
+        train_mask = healthy_mask & ~cond_mask 
 
         scaler = StandardScaler()
         X_train = scaler.fit_transform(X[train_mask])
         model = _new_autoencoder()
         model.fit(X_train, X_train)
 
-        # chronological split of the held-out condition's OWN healthy windows --
-        # "baseline" calibrates the expected error at this condition, "val" is genuinely
-        # unseen healthy data used only to check for false alarms.
         held_out_healthy_idx = np.where(cond_mask & healthy_mask)[0]
         baseline_idx, val_idx = train_test_split(held_out_healthy_idx, test_size=VAL_SIZE, shuffle=False)
 
@@ -124,7 +101,7 @@ def validate_leave_one_condition_out(split: str):
 
 
 def train_final_model(split: str):
-    """Trained on ALL 6 conditions' healthy windows (no holdout) -- the deployable model.
+    """Trained on ALL 6 conditions' healthy windows.
     Also saves a per-condition healthy baseline error, needed for the ratio-based scoring
     a real upload would use once its condition is known."""
     X, y, torque_nm, rpm = build_dataset(split=split)

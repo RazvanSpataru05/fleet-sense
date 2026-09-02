@@ -1,33 +1,17 @@
 """
 Layer 2 as a real supervised classifier, trained on labeled fault data across all 6 real
-recording conditions per fault type (2 torque levels x 3 RPMs) -- not just the single
-condition (20Nm/1000rpm) the rest of this pipeline started scoped to.
+recording conditions per fault type.
 
-Why: the earlier reconstruction-error-ratio heuristic (diagnose_mcc5.py, since removed --
-this module replaced it entirely) was hand-tuned against
-exactly one file per fault type -- every threshold was fragile because there was nothing
-to average over (confirmed directly: mixed-fault validation showed real combo signal and
-single-fault noise landing in the same narrow band, with no single threshold able to
-separate them). This dataset actually has 6 independent real recordings per fault type per
-split; the rest of this project used only 1 of them. Expanding to all 6 needed one
-prerequisite fix: shaft_hz_for_file's fundamental-frequency search was hardcoded for
-1000rpm and gave nonsense at 2000/3000rpm -- now RPM-adaptive (see envelope_dataset_mcc5.py
--- confirmed detection lands within 0.4% of nominal at all 3 RPMs after the fix).
+Torque/RPM are kept as explicit input feature, so the model can learn condition-specific patterns
+instead of being confounded by them, rather than trying to force condition-invariant features.
 
-Torque/RPM are kept as explicit input features (already the tail of the window feature
-vector) so the model can learn condition-specific patterns instead of being confounded by
-them, rather than trying to force condition-invariant features.
-
-Validated with leave-one-condition-out: each of the 6 (torque, rpm) conditions is held out
-in turn as the test set (for every class at once), trained on the other 5. This guarantees
+Validated with leave-one-condition-out: each of the 6 conditions is held out
+in turn as the test set, trained on the other 5. This guarantees
 no window from a held-out file's recording ever appears in training, and tests
-generalization to a genuinely unseen operating condition -- not a random split of
-overlapping windows from the same file, which would leak.
+generalization to a genuinely unseen operating condition.
 
-Reports both window-level accuracy (what the classifier gets right per 0.5s slice) and
-file-level accuracy (majority vote across a whole recording's windows) -- the latter is
-what actually matters for the real use case: diagnosing an uploaded recording, not a
-single isolated window.
+Reports both window-level accuracy and file-level accuracy.
+What matters is the latter: diagnosing an uploaded recording based on the entire file.
 """
 import numpy as np
 import joblib
@@ -79,11 +63,11 @@ def build_dataset(split=SPLIT, force=False):
 
 
 def leave_one_condition_out(X, y, torque_nm, rpm):
-    """Each fold holds out ALL windows from one (torque, rpm) condition -- across every
-    fault class at once -- as test, training on the other 5 conditions' windows. No
-    window from a held-out file ever appears in training."""
+    """Each fold holds out all windows from one condition across every
+    fault class at once as test, training on the other 5 conditions' windows.
+    No window from a held-out file ever appears in training."""
     window_true, window_pred = [], []
-    file_true, file_pred = [], []  # one entry per (fault, held-out condition) file
+    file_true, file_pred = [], [] 
 
     for test_torque, test_rpm in CONDITIONS:
         test_mask = (torque_nm == test_torque) & (rpm == test_rpm)
@@ -98,7 +82,6 @@ def leave_one_condition_out(X, y, torque_nm, rpm):
 
         window_acc = (pred == y[test_mask]).mean()
 
-        # file-level majority vote: one file per fault type at this held-out condition
         y_test = y[test_mask]
         file_hits = 0
         file_total = 0

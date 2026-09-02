@@ -1,15 +1,12 @@
 """
-Loader for the MCC5-THU multi-fault induction motor benchmark dataset (Chen, Liu, Li,
-Zou, He & Zhou, Data in Brief 2026). Single physical 2.2kW motor, every fault type on
-the same rig -- what lets us build one unified detector across fault families instead
-of separate profiles.
+Loader for the MCC5-THU multi-fault induction motor benchmark dataset.
+Single physical 2.2kW motor, every fault type on the same rig. What lets us build
+one unified detector across fault families instead of separate profiles.
 
-Covers both splits: "speed_circulation" (constant torque, swept speed) and
-"torque_circulation" (constant speed, swept torque). Despite the names, both splits'
-files are steady-state at the condition in their filename (verified empirically), and
-the same fault+condition combo often exists in both -- giving us two independent
-recordings per condition instead of one, which is what lets us do a proper file-level
-train/val split instead of chopping a single recording in half.
+Covers both splits: "speed_circulation" and "torque_circulation".
+Despite the names, both splits' files are steady-state at the condition in their filename,
+and the same fault+condition combo often exists in both, giving us two independent
+recordings per condition instead of one.
 """
 import re
 from pathlib import Path
@@ -23,19 +20,11 @@ SPLIT_DIRS = {
     "torque_circulation": DATASET_ROOT / "MCC5-THU Motor_torque_circulation",
 }
 
-FS = 12800  # Hz, confirmed from the recordings' own time column
+FS = 12800 
 COLUMNS = ["time", "speed", "torque", "vib_x", "vib_y", "vib_z", "current_a", "current_b", "current_c"]
 
-# Every model/feature in this project only ever reads these 4 -- confirmed by grepping
-# every module for direct column access. "time", "speed", and all 3 vibration channels
-# are recorded in the dataset but never used anywhere (speed was tried and explicitly
-# rejected as a feature source early on -- see regime_detector.py's docstring). This is
-# what a real upload actually needs to provide; see upload_validation_mcc5.py.
 REQUIRED_COLUMNS = ["current_a", "current_b", "current_c", "torque"]
 
-# e.g. "bearing_outer_H_and_inner_H_speed_circulation_40Nm_2000rpm_250702150458"
-# or   "health_torque_circulation_20Nm_1000rpm_250702154813d"  (torque_circulation
-# timestamps carry a trailing "d")
 FILENAME_RE = re.compile(
     r"^(?P<fault>.+)_(?P<split>speed_circulation|torque_circulation)_"
     r"(?P<torque>\d+)Nm_(?P<rpm>\d+)rpm(?:_\d+d?)?$"
@@ -53,17 +42,6 @@ def parse_filename(csv_path: Path) -> dict:
         "rpm": int(match.group("rpm")),
     }
 
-
-# Known-bad recording, excluded everywhere. Its current_a RMS (0.285) runs 40-70% above
-# every comparable reference: its own 5 same-fault siblings at other conditions (0.158-
-# 0.216) and its 5 same-condition peers at other fault types (a tight 0.169-0.172) -- not
-# an isolated torque-sensor quirk (which is how it first surfaced, via a broken auto-
-# detected torque_nm), the whole recording looks atypical. Consistent with being captured
-# ~7 weeks after every other file at this exact condition (250821 vs 250702-250708),
-# likely a different calibration/rig state. Treated as an accepted data gap for
-# bearing_outer_H at 20Nm/3000rpm specifically, the same way bearing_inner_H's missing
-# file at that same condition already is -- not something to silently keep and let corrupt
-# training data for that fault+condition combination.
 EXCLUDED_FILES = {"bearing_outer_H_torque_circulation_20Nm_3000rpm_250821175544.csv"}
 
 
